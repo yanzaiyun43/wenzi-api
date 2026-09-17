@@ -1,0 +1,20 @@
+# SQLite 数据库与运行时文件
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# 安装锁
+install.lock
+
+# 缓存与日志
+*.log
+/cache/
+/tmp/
+
+# 编辑器与系统文件
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

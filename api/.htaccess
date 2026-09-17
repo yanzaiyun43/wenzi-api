@@ -1,0 +1,55 @@
+# ============================================================
+# 旧识桥 api · api/.htaccess
+# ------------------------------------------------------------
+# 保护 api/ 下的敏感文件与目录（Apache 生效）。
+# serv00 若不支持 .htaccess（如 nginx），系统仍可正常工作的原因：
+#   1. handlers/admin.php、handlers/runtime.php 顶部有 APP_ENTRY 入口守卫（403）
+#   2. config.php、db.php 顶部也有 APP_ENTRY / APP_INSTALL 守卫
+#   3. 路由全部走 query（?route=xxx），不依赖 rewrite
+#   4. 数据库文件即使被下载也只是二进制，不泄露业务配置
+# 本文件是额外一层加固，强烈建议在支持 Apache 的环境保留。
+# ============================================================
+
+# 拒绝直接访问敏感文件：数据库、配置文件、安装锁
+# （注意：install.php 需可访问以便首次安装，故不在此拒绝清单内）
+<FilesMatch "\.(db|sqlite|sqlite3|sqlite2)$">
+  Require all denied
+</FilesMatch>
+<FilesMatch "^(config\.php|install\.lock)$">
+  Require all denied
+</FilesMatch>
+
+# 拒绝直接访问 handlers/ 目录下的所有 PHP（只允许经 index.php include）
+<FilesMatch "^handlers/.*\.php$">
+  Require all denied
+</FilesMatch>
+
+# 拒绝列目录
+Options -Indexes
+
+# 可选：隐藏目录列表符号链接（如启用 FollowSymLinks 时）
+# Options -Indexes -MultiViews
+
+# 禁止访问隐藏文件（.git、.htaccess 自身等）
+<FilesMatch "^\.">
+  Require all denied
+</FilesMatch>
+
+# 若环境为 Apache 2.2 及更早（不支持 Require all denied），
+# 可用以下注释替代上面三条 FilesMatch：
+# <FilesMatch "\.(db|sqlite|sqlite3|sqlite2)$">
+#   Order allow,deny
+#   Deny from all
+# </FilesMatch>
+# <FilesMatch "^(config\.php|install\.lock)$">
+#   Order allow,deny
+#   Deny from all
+# </FilesMatch>
+# <FilesMatch "^handlers/.*\.php$">
+#   Order allow,deny
+#   Deny from all
+# </FilesMatch>
+
+# 说明：query 路由不需要 rewrite；如需美化 URL（可选，非必须），可参考：
+# RewriteEngine On
+# RewriteRule ^runtime\/([a-zA-Z0-9_-]+)\/?$ index.php?route=runtime&path=$1 [L,QSA]

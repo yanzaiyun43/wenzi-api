@@ -1,0 +1,463 @@
+<?php
+/**
+ * 旧识桥 api · backend/install.php（一键安装脚本）
+ * ----------------------------------------------------------------
+ * 访问方式：https://你的域名/backend/install.php
+ * 流程：
+ *   1. install.lock 已存在 -> 拒绝安装
+ *   2. 环境检查（PHP>=7.4、PDO、pdo_sqlite、目录可写等）
+ *   3. 显示表单：管理员 TOKEN / API 密钥（可自动生成）/ 允许来源 / 示例 API 开关
+ *   4. 一键安装：生成 config.php（var_export，禁拼接）、创建 api.db、三张表、
+ *      install.lock；config.php 已存在且无 lock 时二次确认覆盖
+ *   5. 安装成功后提示删除 install.php 或保留 install.lock
+ *
+ * 可选 CLI：php backend/install.php --admin-token=xxx --api-key=xxx --origins=https://example.com
+ * 禁止 eval/exec/system/shell_exec 等危险函数；禁止执行用户输入代码。
+ * ----------------------------------------------------------------
+ */
+
+// 本脚本独立运行：定义 APP_INSTALL 常量供 config.php / db.php 放行
+define('APP_INSTALL', true);
+
+// —— 检测 PHP CLI 模式 ——
+$IS_CLI = (PHP_SAPI === 'cli');
+
+// —— 安装锁检查（Web 与 CLI 都先查）——
+$lockFile = __DIR__ . '/install.lock';
+if (file_exists($lockFile)) {
+    if ($IS_CLI) {
+        fwrite(STDERR, "系统已安装，请删除 install.lock 后重装\n");
+        exit(1);
+    }
+    http_response_code(403);
+    header('Content-Type: text/html; charset=utf-8');
+    echo '<!DOCTYPE html><html lang="zh"><meta charset="utf-8"><title>已安装</title>'
+       . '<body style="font-family:sans-serif;padding:40px"><h2>系统已安装</h2>'
+       . '<p>请删除 install.php，或手动删除 install.lock 后重装。</p></body></html>';
+    exit;
+}
+
+// —— 自动生成密钥工具 ——
+function install_rand_key($len = 32)
+{
+    // 使用 random_bytes 保证强度（PHP>=7.0 均可用）
+    $alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';
+    $bytes = random_bytes($len);
+    $out = '';
+    for ($i = 0; $i < $len; $i++) {
+        $out .= $alphabet[ord($bytes[$i]) % strlen($alphabet)];
+    }
+    return $out;
+}
+
+// —— 校验输入 ——
+function install_validate_token($v)
+{
+    return is_string($v) && preg_match('#^[a-zA-Z0-9_\-]{16,128}$#', $v);
+}
+function install_validate_key($v)
+{
+    return is_string($v) && preg_match('#^[a-zA-Z0-9_\-]{16,128}$#', $v);
+}
+function install_validate_origin($v)
+{
+    $v = trim($v);
+    if ($v === '*') {
+        return true;
+    }
+    // URL 校验：协议://域名[:端口]（不带末尾斜杠）
+    if (!filter_var($v, FILTER_VALIDATE_URL)) {
+        return false;
+    }
+    $parts = parse_url($v);
+    if (!isset($parts['scheme'], $parts['host'])) {
+        return false;
+    }
+    // 禁止换行/控制字符
+    if (preg_match('/[\r\n\t]/', $v)) {
+        return false;
+    }
+    return true;
+}
+function install_parse_origins($raw)
+{
+    // 逗号分隔，去空白，过滤空项
+    $parts = explode(',', (string)$raw);
+    $out = array();
+    foreach ($parts as $p) {
+        $p = trim($p);
+        if ($p !== '') {
+            $out[] = $p;
+        }
+    }
+    return $out;
+}
+
+// —— 环境检查 ——
+function install_env_checks()
+{
+    $problems = array();
+
+    if (version_compare(PHP_VERSION, '7.4.0', '<')) {
+        $problems[] = 'PHP 版本需 >= 7.4（当前 ' . PHP_VERSION . '）';
+    }
+    if (!extension_loaded('PDO')) {
+        $problems[] = '缺少 PDO 扩展';
+    }
+    if (!extension_loaded('pdo_sqlite')) {
+        $problems[] = '缺少 pdo_sqlite 扩展';
+    }
+    if (!is_dir(__DIR__) || !is_writable(__DIR__)) {
+        $problems[] = 'backend/ 目录不可写';
+    }
+    $dbFile = __DIR__ . '/api.db';
+    if (file_exists($dbFile) && !is_writable($dbFile)) {
+        $problems[] = 'api.db 不可写';
+    }
+    $cfgFile = __DIR__ . '/config.php';
+    if (file_exists($cfgFile) && !is_writable($cfgFile)) {
+        $problems[] = 'config.php 不可写';
+    }
+
+    return $problems;
+}
+
+// —— 生成 config.php 内容（var_export，禁止拼接用户输入）——
+function install_build_config($adminToken, $apiKey, array $origins)
+{
+    $originExpr = var_export($origins, true);
+    $adminExpr  = var_export($adminToken, true);
+    $keyExpr    = var_export($apiKey, true);
+
+    return <<<PHP
+<?php
+/**
+ * 旧识桥 api · backend/config.php（由 install.php 生成）
+ * 可手动编辑以下常量更换密钥/来源；保存即生效，无需重启（短进程模式）。
+ */
+
+if (!defined('APP_ENTRY') && !defined('APP_INSTALL')) {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Forbidden');
+}
+
+define('ADMIN_TOKEN', {$adminExpr});
+
+define('API_ACCESS_KEY', {$keyExpr});
+
+\$ALLOWED_ORIGINS = {$originExpr};
+
+define('DB_PATH', __DIR__ . '/api.db');
+
+define('TRUST_X_FORWARDED_FOR', false);
+PHP;
+}
+
+// —— 执行安装（生成 config / 建库 / 建表 / 写锁）——
+function install_run($adminToken, $apiKey, array $origins, $withSample)
+{
+    $cfgFile = __DIR__ . '/config.php';
+    $dbFile  = __DIR__ . '/api.db';
+    $lockFile = __DIR__ . '/install.lock';
+
+    // 1. 生成 config.php（覆盖已存在文件，调用方已确认）
+    $code = install_build_config($adminToken, $apiKey, $origins);
+    if (file_put_contents($cfgFile, $code) === false) {
+        return array(false, 'config.php 写入失败');
+    }
+
+    // 2. 建库 + 建表（复用 db.php）
+    require_once __DIR__ . '/db.php';
+    try {
+        $pdo = db_connect();
+    } catch (PDOException $e) {
+        return array(false, '数据库初始化失败：' . $e->getMessage());
+    }
+
+    // 3. 写入示例 API 与素材（可选）
+    if ($withSample) {
+        install_sample_data($pdo);
+    }
+
+    // 4. 写 install.lock
+    if (file_put_contents($lockFile, date('c')) === false) {
+        return array(false, 'install.lock 写入失败');
+    }
+
+    return array(true, 'ok');
+}
+
+function install_sample_data($pdo)
+{
+    $now = time();
+    // 示例 template API
+    $st = $pdo->prepare("INSERT OR IGNORE INTO api_config (path, name, type, content, enabled, create_time)
+                        VALUES ('hello', '打招呼', 'template', '你好，{{name}}！', 1, :t)");
+    $st->execute(array(':t' => $now));
+
+    // 示例 random_text API
+    $st = $pdo->prepare("INSERT OR IGNORE INTO api_config (path, name, type, content, enabled, create_time)
+                        VALUES ('daily', '每日一句', 'random_text', '', 1, :t)");
+    $st->execute(array(':t' => $now));
+
+    // 给 daily 加两条素材
+    $pid = $pdo->prepare("SELECT id FROM api_config WHERE path='daily'");
+    $pid->execute();
+    $dailyId = (int)$pid->fetchColumn();
+    if ($dailyId > 0) {
+        $ins = $pdo->prepare('INSERT INTO api_text (api_id, content) VALUES (:aid, :content)');
+        $ins->execute(array(':aid' => $dailyId, ':content' => '今天也要加油哦！'));
+        $ins->execute(array(':aid' => $dailyId, ':content' => '愿你被世界温柔以待。'));
+    }
+}
+
+// ============================================================
+//  CLI 模式
+// ============================================================
+if ($IS_CLI) {
+    $args = array();
+    foreach ($argv as $arg) {
+        if (strpos($arg, '--') === 0) {
+            $eq = strpos($arg, '=');
+            if ($eq !== false) {
+                $args[substr($arg, 2, $eq - 2)] = substr($arg, $eq + 1);
+            } else {
+                $args[substr($arg, 2)] = 'true';
+            }
+        }
+    }
+
+    $err = null;
+    $adminToken = isset($args['admin-token']) ? (string)$args['admin-token'] : '';
+    $apiKey     = isset($args['api-key']) ? (string)$args['api-key'] : '';
+    $originsRaw = isset($args['origins']) ? (string)$args['origins'] : '';
+    $sampleRaw  = isset($args['sample']) ? (string)$args['sample'] : '1';
+
+    if (!install_validate_token($adminToken)) {
+        $err = 'admin-token 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+    } elseif (!install_validate_key($apiKey)) {
+        $err = 'api-key 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+    } else {
+        $origins = install_parse_origins($originsRaw);
+        if (empty($origins)) {
+            $err = 'origins 无效（需至少一个来源）';
+        } else {
+            foreach ($origins as $o) {
+                if (!install_validate_origin($o)) {
+                    $err = 'origins 含无效项：' . $o;
+                    break;
+                }
+            }
+        }
+    }
+    if ($err) {
+        fwrite(STDERR, $err . "\n");
+        exit(2);
+    }
+
+    // withSample：默认 true，仅当 sample=0 或 false 时关闭
+    $withSample = !in_array($sampleRaw, array('0', 'false'), true);
+
+    list($ok, $msg) = install_run($adminToken, $apiKey, $origins, $withSample);
+    if (!$ok) {
+        fwrite(STDERR, "安装失败：$msg\n");
+        exit(1);
+    }
+    fwrite(STDOUT, "安装成功\n");
+    fwrite(STDOUT, "管理员 TOKEN：$adminToken\n");
+    fwrite(STDOUT, "API 密钥：$apiKey\n");
+    fwrite(STDOUT, "管理接口：https://你的域名/backend/index.php?route=admin/api/list\n");
+    fwrite(STDOUT, "调用示例：https://你的域名/backend/index.php?route=runtime&path=hello&key=$apiKey&name=张三\n");
+    fwrite(STDOUT, "请删除 install.php 或保留 install.lock\n");
+    exit(0);
+}
+
+// ============================================================
+//  Web 模式
+// ============================================================
+
+// 处理表单提交
+$submitted = ($_SERVER['REQUEST_METHOD'] === 'POST');
+$resultOk = false;
+$resultMsg = '';
+$showConfirm = false;   // config.php 已存在且无 lock 时二次确认
+$formData = array(
+    'admin_token' => '',
+    'api_key'     => '',
+    'origins'     => 'http://localhost',
+    'sample'      => '1',
+);
+
+if ($submitted) {
+    // 读取输入
+    $formData['admin_token'] = isset($_POST['admin_token']) ? trim((string)$_POST['admin_token']) : '';
+    $formData['api_key']     = isset($_POST['api_key']) ? trim((string)$_POST['api_key']) : '';
+    $formData['origins']     = isset($_POST['origins']) ? trim((string)$_POST['origins']) : '';
+    $formData['sample']      = isset($_POST['sample']) ? (string)$_POST['sample'] : '0';
+
+    // 二次确认覆盖：config.php 已存在且无 lock 时，需确认参数
+    $confirmed = (isset($_POST['confirm']) && $_POST['confirm'] === '1');
+
+    $configExists = file_exists(__DIR__ . '/config.php');
+    if ($configExists && !$confirmed) {
+        // 需二次确认，不执行
+        $showConfirm = true;
+        $resultMsg = 'config.php 已存在，是否覆盖安装？';
+    } else {
+        // 校验
+        $err = null;
+        if (!install_validate_token($formData['admin_token'])) {
+            $err = '管理员 TOKEN 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+        } elseif (!install_validate_key($formData['api_key'])) {
+            $err = 'API 密钥无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+        } else {
+            $origins = install_parse_origins($formData['origins']);
+            if (empty($origins)) {
+                $err = '允许来源无效（需至少一个来源）';
+            } else {
+                foreach ($origins as $o) {
+                    if (!install_validate_origin($o)) {
+                        $err = '允许来源含无效项：' . htmlspecialchars($o);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($err) {
+            $resultMsg = $err;
+        } else {
+            $withSample = ($formData['sample'] === '1');
+            list($ok, $msg) = install_run($formData['admin_token'], $formData['api_key'], $origins, $withSample);
+            $resultOk = $ok;
+            $resultMsg = $msg;
+        }
+    }
+}
+
+// 环境检查（无论是否提交都显示，失败则只提示）
+$envProblems = install_env_checks();
+$envOk = empty($envProblems);
+
+// 未提交时给默认自动生成值（仅当表单空）
+if (!$submitted) {
+    $formData['admin_token'] = install_rand_key(32);
+    $formData['api_key']     = install_rand_key(32);
+}
+?>
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧识桥 api 一键安装</title>
+<style>
+  body{font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;margin:0;padding:24px;color:#2c3e50}
+  .box{max-width:640px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.08);padding:28px 32px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:#7f8c8d;font-size:13px;margin-bottom:20px}
+  label{display:block;margin:14px 0 6px;font-weight:600;font-size:14px}
+  .hint{color:#95a5a6;font-size:12px;margin-top:4px}
+  input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #d0d7de;border-radius:6px;font-size:14px;font-family:inherit}
+  textarea{min-height:70px}
+  .row{display:flex;gap:8px}
+  .row input{flex:1}
+  button{background:#4c6ef5;color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:18px}
+  button:hover{background:#3b5bdb}
+  .btn-mini{background:#e7ecff;color:#3b5bdb;border:1px solid #c7d2ff;border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px}
+  .ok{background:#d3f9d8;color:#1e7d32;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px;white-space:pre-line}
+  .err{background:#ffe3e3;color:#c92a2a;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
+  .warn{background:#fff3bf;color:#b8860b;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
+  ul.check{list-style:none;padding:0;margin:12px 0}
+  ul.check li{padding:4px 0;font-size:14px}
+  .pass{color:#2f9e44}.fail{color:#c92a2a}
+  code{background:#f1f3f5;padding:1px 6px;border-radius:4px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>旧识桥 api 一键安装</h1>
+  <div class="sub">原生 PHP + SQLite，前后端分离文字 API 管理系统</div>
+
+  <?php if (!$envOk): ?>
+    <div class="err"><b>环境检查未通过</b>
+      <ul class="check">
+        <?php foreach ($envProblems as $p): ?>
+          <li class="fail">✗ <?php echo htmlspecialchars($p); ?></li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php else: ?>
+
+    <?php if ($resultOk): ?>
+      <div class="ok">
+        <b>✔ 安装成功！</b>
+        管理员 TOKEN：<code><?php echo htmlspecialchars($formData['admin_token']); ?></code>
+        API 密钥：<code><?php echo htmlspecialchars($formData['api_key']); ?></code>
+
+        管理接口：<code>backend/index.php?route=admin/api/list</code>
+        调用示例：<code>backend/index.php?route=runtime&amp;path=hello&amp;key=<?php echo htmlspecialchars($formData['api_key']); ?>&amp;name=张三</code>
+
+        <b>请立即删除 install.php，或至少保留 install.lock。</b>
+        修改 backend/config.php 可更换密钥。
+      </div>
+    <?php else: ?>
+      <?php if ($resultMsg !== ''): ?>
+        <div class="<?php echo $showConfirm ? 'warn' : 'err'; ?>"><?php echo htmlspecialchars($resultMsg); ?></div>
+      <?php endif; ?>
+
+      <form method="post" action="install.php" onsubmit="return validateForm()">
+        <?php if ($showConfirm): ?>
+          <input type="hidden" name="confirm" value="1">
+        <?php endif; ?>
+
+        <label>管理员 TOKEN <span class="hint">[a-zA-Z0-9_-]{16,128}，管理接口鉴权用</span></label>
+        <div class="row">
+          <input type="text" name="admin_token" id="admin_token" value="<?php echo htmlspecialchars($formData['admin_token']); ?>">
+          <button type="button" class="btn-mini" onclick="document.getElementById('admin_token').value=randKey()">自动生成</button>
+        </div>
+
+        <label>API 访问密钥 <span class="hint">[a-zA-Z0-9_-]{16,128}，对外调用鉴权用</span></label>
+        <div class="row">
+          <input type="text" name="api_key" id="api_key" value="<?php echo htmlspecialchars($formData['api_key']); ?>">
+          <button type="button" class="btn-mini" onclick="document.getElementById('api_key').value=randKey()">自动生成</button>
+        </div>
+
+        <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
+        <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
+
+        <label>是否创建示例 API</label>
+        <div style="margin-top:6px">
+          <label style="display:inline;font-weight:400;margin-right:20px"><input type="radio" name="sample" value="1" <?php echo $formData['sample'] === '1' ? 'checked' : ''; ?>> 是</label>
+          <label style="display:inline;font-weight:400"><input type="radio" name="sample" value="0" <?php echo $formData['sample'] === '0' ? 'checked' : ''; ?>> 否</label>
+        </div>
+
+        <?php if ($showConfirm): ?>
+          <button type="submit" name="go" value="confirm">确认覆盖安装</button>
+          <button type="submit" name="go" value="cancel" style="background:#adb5bd">取消</button>
+        <?php else: ?>
+          <button type="submit">一键安装</button>
+        <?php endif; ?>
+      </form>
+    <?php endif; ?>
+  <?php endif; ?>
+</div>
+
+<script>
+function randKey(){
+  var a='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-',s='';
+  var c=crypto.getRandomValues(new Uint8Array(32));
+  for(var i=0;i<32;i++){s+=a[c[i]%a.length];}
+  return s;
+}
+function validateForm(){
+  var t=document.getElementById('admin_token').value;
+  var k=document.getElementById('api_key').value;
+  if(!/^[a-zA-Z0-9_-]{16,128}$/.test(t)){alert('管理员 TOKEN 需 16-128 位字母数字下划线中划线');return false;}
+  if(!/^[a-zA-Z0-9_-]{16,128}$/.test(k)){alert('API 密钥需 16-128 位字母数字下划线中划线');return false;}
+  return true;
+}
+</script>
+</body>
+</html>

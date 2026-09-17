@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧识桥 api · 统计门户</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; color: #303133; line-height: 1.6; }
+  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
+  .topbar .sub { color: #909399; font-size: 12px; margin-left: 8px; }
+  .wrap { padding: 12px 16px; max-width: 1000px; margin: 0 auto; }
+  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center; }
+  .stat-card .num { font-size: 28px; font-weight: 600; color: #409eff; line-height: 1; margin-bottom: 4px; }
+  .stat-card .label { font-size: 13px; color: #909399; }
+  .api-list { display: flex; flex-direction: column; gap: 12px; }
+  .api-card { background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .api-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .api-header .path { font-family: "SF Mono",Consolas,monospace; font-size: 14px; font-weight: 500; color: #303133; }
+  .api-header .name { color: #606266; font-size: 13px; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .tag-success { background: #f0f9eb; color: #67c23a; }
+  .tag-warning { background: #fdf6ec; color: #e6a23c; }
+  .tag-info { background: #f4f4f5; color: #909399; }
+  .api-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; font-size: 12px; color: #606266; }
+  .api-body .field { display: flex; flex-direction: column; gap: 2px; }
+  .api-body .field-label { color: #909399; font-size: 11px; }
+  .api-body .field-value { font-family: "SF Mono",Consolas,monospace; color: #303133; }
+  .empty { text-align: center; color: #909399; padding: 40px 0; }
+  .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e4e7ed; text-align: center; color: #909399; font-size: 12px; }
+  .btn-admin { display: inline-block; margin-top: 8px; padding: 8px 16px; background: #409eff; color: #fff; border-radius: 6px; text-decoration: none; font-size: 13px; }
+  .btn-admin:hover { background: #66b1ff; }
+  .loading { text-align: center; color: #909399; padding: 40px 0; }
+  .error { text-align: center; color: #f56c6c; padding: 40px 0; }
+
+  @media (max-width: 480px) {
+    .topbar { padding: 10px 12px; }
+    .topbar h1 { font-size: 15px; }
+    .wrap { padding: 8px 12px; }
+    .stat-card { padding: 12px; }
+    .stat-card .num { font-size: 24px; }
+    .api-card { padding: 10px 12px; }
+    .api-header .path { font-size: 13px; }
+    .api-body { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div>
+    <h1>旧识桥 api</h1>
+    <span class="sub">公共统计门户</span>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="overview" class="overview">
+    <div class="stat-card"><div class="num">-</div><div class="label">API 总数</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">素材总数</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">调用总数</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">今日调用</div></div>
+  </div>
+
+  <div id="apiList" class="api-list">
+    <div class="loading">加载中…</div>
+  </div>
+
+  <div class="footer">
+    <a href="/admin/" class="btn-admin">进入管理后台</a>
+    <div style="margin-top:8px">旧识桥 api 统计门户 · 数据实时更新</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const API_BASE = location.origin + '/api/index.php';
+  const overviewEl = document.getElementById('overview');
+  const apiListEl = document.getElementById('apiList');
+
+  function fmtNum(n) {
+    if (n >= 10000) return (n/10000).toFixed(1) + 'w';
+    if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+    return String(n);
+  }
+
+  function renderOverview(data) {
+    overviewEl.innerHTML = '';
+    const items = [
+      { key: 'api_total', label: 'API 总数' },
+      { key: 'text_total', label: '素材总数' },
+      { key: 'call_total', label: '调用总数' },
+      { key: 'call_today', label: '今日调用' },
+    ];
+    items.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'stat-card';
+      div.innerHTML = '<div class="num">' + fmtNum(data[item.key] || 0) + '</div><div class="label">' + item.label + '</div>';
+      overviewEl.appendChild(div);
+    });
+  }
+
+  function renderApis(apis) {
+    if (!apis || apis.length === 0) {
+      apiListEl.innerHTML = '<div class="empty">暂无 API，请前往后台新增</div>';
+      return;
+    }
+    apiListEl.innerHTML = '';
+    apis.forEach(api => {
+      const div = document.createElement('div');
+      div.className = 'api-card';
+      const typeTag = api.type === 'template'
+        ? '<span class="tag tag-warning">template</span>'
+        : '<span class="tag tag-success">random_text</span>';
+      const statusTag = api.enabled === 1
+        ? '<span class="tag tag-success">启用</span>'
+        : '<span class="tag tag-info">禁用</span>';
+      div.innerHTML =
+        '<div class="api-header">' +
+          '<span class="path">' + escapeHtml(api.path) + '</span>' +
+          (api.name ? '<span class="name">' + escapeHtml(api.name) + '</span>' : '') +
+          typeTag + statusTag +
+        '</div>' +
+        '<div class="api-body">' +
+          '<div class="field"><span class="field-label">素材数</span><span class="field-value">' + fmtNum(api.text_count) + '</span></div>' +
+          '<div class="field"><span class="field-label">调用数</span><span class="field-value">' + fmtNum(api.call_total) + '</span></div>' +
+        '</div>';
+      apiListEl.appendChild(div);
+    });
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,''');
+  }
+
+  function loadStats() {
+    fetch(API_BASE + '?route=stats', { credentials: 'omit' })
+      .then(r => r.json())
+      .then(res => {
+        if (res && res.code === 0 && res.data) {
+          renderOverview(res.data.overview || {});
+          renderApis(res.data.apis || []);
+        } else {
+          apiListEl.innerHTML = '<div class="error">加载失败：' + escapeHtml(res?.msg || '未知错误') + '</div>';
+        }
+      })
+      .catch(e => {
+        apiListEl.innerHTML = '<div class="error">请求异常：' + escapeHtml(e.message) + '</div>';
+      });
+  }
+
+  loadStats();
+})();
+</script>
+</body>
+</html>

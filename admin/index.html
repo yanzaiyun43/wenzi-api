@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧识桥 api · 管理后台</title>
+<!-- CDN 锁版本：Vue3 / Element Plus / icons / axios -->
+<link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css">
+<script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
+<script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+<script src="https://unpkg.com/axios@1.7.2/dist/axios.min.js"></script>
+<script src="js/app.js"></script>
+<style>
+  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
+  .topbar .sub { color: #909399; font-size: 11px; margin-left: 8px; }
+  .wrap { padding: 12px 16px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar .search { width: 100%; max-width: 220px; flex: 1; }
+  .table-card { background: #fff; border-radius: 8px; padding: 8px; overflow-x: auto; }
+  .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+  .mono { font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
+  .el-tag + .el-tag { margin-left: 4px; }
+  /* 卡片式布局 */
+  .card-list { display: flex; flex-direction: column; gap: 12px; }
+  .api-card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .card-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card-body { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .card-field { display: flex; gap: 8px; font-size: 13px; }
+  .card-field .label { color: #909399; min-width: 56px; }
+  .card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* 响应式：≤480px */
+  @media (max-width: 480px) {
+    .topbar { padding: 10px 12px; }
+    .topbar h1 { font-size: 15px; }
+    .wrap { padding: 8px 12px; }
+    .toolbar { gap: 6px; }
+    .toolbar .search { max-width: none; }
+    .table-card { padding: 4px; }
+    .el-pagination { --el-pagination-button-size: 28px; }
+    /* 弹窗宽度 92% */
+    .el-dialog { width: 92% !important; margin: 0 4% !important; }
+    .el-dialog__body { padding: 16px !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div>
+      <h1 style="display:inline-block">旧识桥 api 管理后台</h1>
+      <span class="sub">API 配置 / 文字素材 / 访问日志</span>
+    </div>
+    <div>
+      <el-button :icon="'Setting'" size="small" @click="openTokenDialog">设置 TOKEN</el-button>
+      <el-button :icon="'Key'" size="small" @click="openApiKeyDialog">设置密钥</el-button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <el-button type="primary" :icon="'Plus'" @click="goAdd">新增 API</el-button>
+      <el-input class="search" v-model="query.keyword" placeholder="搜索 path / 名称" clearable @input="onSearch" :prefix-icon="'Search'"></el-input>
+      <el-select v-model="query.enabled" placeholder="全部状态" clearable style="width:140px" @change="onSearch">
+        <el-option label="启用" :value="1"></el-option>
+        <el-option label="禁用" :value="0"></el-option>
+      </el-select>
+      <el-button :icon="'Refresh'" @click="loadList">刷新</el-button>
+    </div>
+
+    <div class="table-card" v-show="!isMobile">
+      <el-table :data="list" v-loading="loading" border stripe>
+        <el-table-column prop="id" label="ID" width="60" align="center"></el-table-column>
+        <el-table-column prop="path" label="Path" width="150">
+          <template #default="s">
+            <span class="mono">{{ s.row.path }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="name" label="名称" min-width="120"></el-table-column>
+        <el-table-column label="类型" width="110">
+          <template #default="s">
+            <el-tag v-if="s.row.type==='template'" type="warning">template</el-tag>
+            <el-tag v-else type="success">random_text</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default="s">
+            <el-tag :type="s.row.enabled===1 ? 'success' : 'info'">{{ s.row.enabled===1 ? '启用' : '禁用' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="170">
+          <template #default="s">{{ JSQ.fmtTime(s.row.create_time) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="300" fixed="right">
+          <template #default="s">
+            <el-button size="small" :icon="'Edit'" @click="goEdit(s.row.id)">编辑</el-button>
+            <el-button size="small" type="warning" :icon="'Document'" @click="goText(s.row.id)">素材</el-button>
+            <el-button size="small" type="info" :icon="'Tickets'" @click="goLog(s.row.id)">日志</el-button>
+            <el-button size="small" :type="s.row.enabled===1 ? 'danger' : 'success'" @click="toggleRow(s.row)">{{ s.row.enabled===1 ? '禁用' : '启用' }}</el-button>
+            <el-button size="small" type="primary" plain :icon="'Link'" @click="copyUrl(s.row)">复制</el-button>
+            <el-button size="small" type="danger" plain :icon="'Delete'" @click="delRow(s.row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 移动端卡片式布局 -->
+      <div class="card-list" v-show="isMobile">
+        <div class="api-card" v-for="row in list" :key="row.id">
+          <div class="card-header">
+            <span class="mono">{{ row.path }}</span>
+            <el-tag v-if="row.type==='template'" type="warning" size="small">template</el-tag>
+            <el-tag v-else type="success" size="small">random_text</el-tag>
+            <el-tag :type="row.enabled===1 ? 'success' : 'info'" size="small">{{ row.enabled===1 ? '启用' : '禁用' }}</el-tag>
+          </div>
+          <div class="card-body">
+            <div class="card-field"><span class="label">名称</span><span>{{ row.name }}</span></div>
+            <div class="card-field"><span class="label">创建时间</span><span>{{ JSQ.fmtTime(row.create_time) }}</span></div>
+          </div>
+          <div class="card-actions">
+            <el-button size="small" :icon="'Edit'" @click="goEdit(row.id)">编辑</el-button>
+            <el-button size="small" type="warning" :icon="'Document'" @click="goText(row.id)">素材</el-button>
+            <el-button size="small" type="info" :icon="'Tickets'" @click="goLog(row.id)">日志</el-button>
+            <el-button size="small" :type="row.enabled===1 ? 'danger' : 'success'" @click="toggleRow(row)">{{ row.enabled===1 ? '禁用' : '启用' }}</el-button>
+            <el-button size="small" type="primary" plain :icon="'Link'" @click="copyUrl(row)">复制</el-button>
+            <el-button size="small" type="danger" plain :icon="'Delete'" @click="delRow(row)">删除</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pager" v-show="!isMobile">
+        <el-pagination
+          background
+          layout="total, prev, pager, next"
+          :total="total"
+          :page-size="query.page_size"
+          :current-page="query.page"
+          @current-change="onPageChange"
+        ></el-pagination>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, onMounted, onBeforeUnmount } = Vue;
+
+const app = createApp({
+  setup() {
+    const JSQ = window.JSQ;
+    const list = ref([]);
+    const total = ref(0);
+    const loading = ref(false);
+    const query = reactive({ keyword: '', enabled: null, page: 1, page_size: 20 });
+
+    // 移动端检测（用于卡片式布局切换）
+    const isMobile = ref(false);
+    function checkMobile() { isMobile.value = window.innerWidth <= 480; }
+    onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile); });
+    onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+
+    async function loadList() {
+      loading.value = true;
+      try {
+        const params = { page: query.page, page_size: query.page_size };
+        if (query.keyword) params.keyword = query.keyword;
+        if (query.enabled !== null && query.enabled !== '') params.enabled = query.enabled;
+        const data = await JSQ.apiRequest('admin/api/list', params, 'GET');
+        list.value = data.list || [];
+        total.value = data.total || 0;
+      } catch (e) {
+        // 拦截器已提示
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function onSearch() { query.page = 1; loadList(); }
+    function onPageChange(p) { query.page = p; loadList(); }
+
+    function goAdd() { location.href = 'edit-api.html'; }
+    function goEdit(id) { location.href = 'edit-api.html?id=' + id; }
+    function goText(id) { location.href = 'text-manage.html?api_id=' + id; }
+    function goLog(id) { location.href = 'log.html?api_id=' + id; }
+
+    async function toggleRow(row) {
+      const target = row.enabled === 1 ? 0 : 1;
+      if (target === 0) {
+        try {
+          await ElMessageBox.confirm('确认禁用 API「' + row.path + '」？禁用后对外调用将返回 403。', '禁用确认', {
+            type: 'warning', confirmButtonText: '禁用', cancelButtonText: '取消',
+          });
+        } catch (e) { return; }
+      }
+      try {
+        await JSQ.toggleApi(row.id, target);
+        row.enabled = target;
+        ElMessage.success(target === 1 ? '已启用' : '已禁用');
+      } catch (e) {}
+    }
+
+    async function delRow(row) {
+      try {
+        await ElMessageBox.confirm('确认删除 API「' + row.path + '」？其全部素材将一并删除。', '删除确认', {
+          type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+        });
+      } catch (e) { return; }
+      try {
+        await JSQ.deleteApi(row.id);
+        ElMessage.success('已删除');
+        loadList();
+      } catch (e) {}
+    }
+
+    async function copyUrl(row) {
+      const url = JSQ.buildApiUrl(row.path);
+      await JSQ.copyText(url);
+      ElMessage.success('调用地址已复制');
+    }
+
+    async function openTokenDialog() {
+      if (await JSQ.promptAdminToken()) {
+        ElMessage.success('TOKEN 已保存，可点「刷新」重新加载');
+      }
+    }
+
+    async function openApiKeyDialog() {
+      if (await JSQ.promptApiKey()) {
+        ElMessage.success('密钥已保存，复制地址将自动带上');
+      }
+    }
+
+    // 首次进入若无 token 提示
+    onMounted(() => {
+      if (!JSQ.getToken()) {
+        ElMessage.warning('请先设置管理员 TOKEN');
+      }
+      loadList();
+    });
+
+    return { JSQ, list, total, loading, query, loadList, onSearch, onPageChange, goAdd, goEdit, goText, goLog, toggleRow, delRow, copyUrl, openTokenDialog, openApiKeyDialog, isMobile };
+  },
+}).use(ElementPlus);
+
+// 注册 Element Plus 图标组件（支持 :icon="'Plus'" 等字符串写法）
+if (window.ElementPlusIconsVue) {
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+}
+
+app.mount('#app');
+</script>
+</body>
+</html>

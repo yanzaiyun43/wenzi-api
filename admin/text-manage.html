@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旧识桥 api · 文字素材管理</title>
+<!-- CDN 锁版本：Vue3 / Element Plus / icons / axios -->
+<link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css">
+<script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
+<script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
+<script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+<script src="https://unpkg.com/axios@1.7.2/dist/axios.min.js"></script>
+<script src="js/app.js"></script>
+<style>
+  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
+  .topbar .sub { color: #909399; font-size: 11px; margin-left: 8px; }
+  .wrap { padding: 12px 16px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px; }
+  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; }
+  .preview { white-space: pre-wrap; word-break: break-word; color: #606266; max-height: 140px; overflow: auto; }
+  .pager { display: flex; justify-content: flex-end; align-items: center; margin-top: 12px; gap: 8px; }
+  .batch-tab { display: inline-block; padding: 8px 12px; cursor: pointer; color: #909399; border-bottom: 2px solid transparent; margin-right: 6px; font-size: 13px; }
+  .batch-tab.active { color: #409eff; border-bottom-color: #409eff; font-weight: 500; }
+  .batch-upload { margin-top: 10px; }
+  .file-info, .paste-info { margin-top: 6px; font-size: 12px; color: #909399; }
+  .batch-import-box { padding: 6px 0; }
+  /* 卡片式布局 */
+  .card-list { display: flex; flex-direction: column; gap: 12px; }
+  .text-card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .card-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .card-body { margin-bottom: 10px; }
+  .card-content { white-space: pre-wrap; word-break: break-word; color: #606266; font-size: 13px; line-height: 1.6; }
+  .card-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+  @media (max-width: 480px) {
+    .topbar { padding: 10px 12px; }
+    .topbar h1 { font-size: 15px; }
+    .wrap { padding: 8px 12px; }
+    .card { padding: 12px; }
+    .toolbar { gap: 6px; }
+    .el-input { width: 100% !important; }
+    .pager { flex-wrap: wrap; }
+    .batch-tab { padding: 6px 10px; font-size: 12px; }
+    .el-dialog { width: 92% !important; margin: 0 4% !important; }
+    .el-dialog__body { padding: 16px !important; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="topbar">
+    <div>
+      <h1 style="display:inline-block">文字素材管理</h1>
+      <span class="sub" v-if="apiId">API #{{ apiId }} · {{ apiName }}</span>
+      <span class="sub" v-else>按 API 管理其下文字素材</span>
+    </div>
+    <div>
+      <el-button size="small" :icon="'Back'" @click="goBack">返回列表</el-button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <el-alert v-if="!apiId" type="warning" :closable="false" style="margin-bottom:16px">
+      请在 API 列表页进入某个 API 的素材管理（或地址附带 ?api_id=xxx）。
+    </el-alert>
+
+    <div class="card" v-loading="loading">
+      <div class="toolbar">
+        <el-input v-model="keyword" placeholder="搜索素材内容" clearable style="width:260px" @keyup.enter="onSearch" @clear="onSearch">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+        <el-button type="primary" :icon="'Search'" @click="onSearch">搜索</el-button>
+        <el-button :icon="'Refresh'" @click="reload" :disabled="!apiId">刷新</el-button>
+        <span class="grow"></span>
+        <el-button type="success" :icon="'Plus'" @click="openAdd" :disabled="!apiId">新增素材</el-button>
+        <el-button type="warning" :icon="'Upload'" @click="openBatchImport" :disabled="!apiId">批量导入</el-button>
+      </div>
+
+      <el-table :data="list" border stripe v-loading="tableLoading" v-show="!isMobile">
+        <el-table-column type="index" label="#" width="55" align="center"></el-table-column>
+        <el-table-column label="Id" prop="id" width="70" align="center"></el-table-column>
+        <el-table-column label="内容" min-width="320">
+          <template #default="{ row }">
+            <div class="preview">{{ row.content }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" align="center" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" text type="primary" :icon="'Edit'" @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" text type="danger" :icon="'Delete'" @click="onDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 移动端卡片式布局 -->
+      <div class="card-list" v-show="isMobile">
+        <div class="text-card" v-for="row in list" :key="row.id">
+          <div class="card-header">
+            <span class="mono">#{{ row.id }}</span>
+          </div>
+          <div class="card-body">
+            <div class="card-content">{{ row.content }}</div>
+          </div>
+          <div class="card-actions">
+            <el-button size="small" text type="primary" :icon="'Edit'" @click="openEdit(row)">编辑</el-button>
+            <el-button size="small" text type="danger" :icon="'Delete'" @click="onDelete(row)">删除</el-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pager" v-show="!isMobile">
+        <el-pagination
+          layout="total, prev, pager, next, jumper"
+          :total="total"
+          :page-size="pageSize"
+          :current-page="page"
+          @current-change="onPageChange"
+        ></el-pagination>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新增 / 编辑对话框 -->
+  <el-dialog v-model="dialogVisible" :title="editId ? '编辑素材' : '新增素材'" width="580px" @closed="onDialogClosed">
+    <el-form :model="form" label-width="70px">
+      <el-form-item label="内容" required>
+        <el-input v-model="form.content" type="textarea" :rows="7" placeholder="请输入文字素材内容"
+                  maxlength="5000" show-word-limit></el-input>
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="dialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- 批量导入对话框 -->
+  <el-dialog v-model="batchDialogVisible" title="批量导入素材" width="640px" @closed="onBatchDialogClosed">
+    <div class="batch-import-box">
+      <div class="batch-tab" :class="{ active: batchTab === 'file' }" @click="batchTab = 'file'">上传 .txt 文件</div>
+      <div class="batch-tab" :class="{ active: batchTab === 'paste' }" @click="batchTab = 'paste'">粘贴文本</div>
+
+      <div v-if="batchTab === 'file'">
+        <el-upload
+          class="batch-upload"
+          action="#"
+          :auto-upload="false"
+          :on-change="onFileChange"
+          :limit="1"
+          :on-exceed="() => ElMessage.warning('仅允许上传 1 个文件')"
+          accept=".txt"
+          :show-file-list="true"
+        >
+          <el-button type="primary" :icon="'Upload'">选择文件</el-button>
+          <template #tip>
+            <div class="el-upload__tip">仅支持 .txt 文件，每行一条素材</div>
+          </template>
+        </el-upload>
+        <div v-if="batchFileName" class="file-info">{{ batchFileName }} · 识别到 <b>{{ batchTotal }}</b> 条</div>
+      </div>
+
+      <div v-else>
+        <el-input
+          v-model="batchPasteText"
+          type="textarea"
+          :rows="10"
+          placeholder="每行一条素材，直接粘贴多行文本…"
+          style="width: 100%"
+        ></el-input>
+        <div v-if="batchPasteText" class="paste-info">识别到 <b>{{ batchTotal }}</b> 条</div>
+      </div>
+
+      <el-switch v-model="batchSkipDuplicate" :active-value="true" :inactive-value="false" active-text="跳过重复（批内 + 该 API 已有）" inactive-text="不去重" style="margin-top: 12px"></el-switch>
+    </div>
+    <template #footer>
+      <el-button @click="batchDialogVisible = false">取消</el-button>
+      <el-button type="primary" :loading="batchSaving" @click="onBatchSave">开始导入</el-button>
+    </template>
+  </el-dialog>
+</div>
+
+<script>
+const { createApp, ref, reactive, onMounted, computed, onBeforeUnmount } = Vue;
+
+const app = createApp({
+  setup() {
+    const JSQ = window.JSQ;
+    const apiId = ref(0);
+    const apiName = ref('');
+
+    const keyword = ref('');
+    const list = ref([]);
+    const total = ref(0);
+    const page = ref(1);
+    const pageSize = ref(20);
+    const loading = ref(false);
+    const tableLoading = ref(false);
+
+    const dialogVisible = ref(false);
+    const editId = ref(0);
+    const saving = ref(false);
+    const form = reactive({ content: '' });
+
+    // 批量导入
+    const batchDialogVisible = ref(false);
+    const batchTab = ref('file');
+    const batchFile = ref(null);
+    const batchFileName = ref('');
+    const batchPasteText = ref('');
+    const batchSkipDuplicate = ref(true);
+    const batchSaving = ref(false);
+    const batchTotal = ref(0);
+
+    // 移动端检测（卡片式布局）
+    const isMobile = ref(false);
+    function checkMobile() { isMobile.value = window.innerWidth <= 480; }
+    onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile); });
+    onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+
+    function goBack() { location.href = 'index.html'; }
+
+    async function loadList() {
+      if (!apiId.value) { list.value = []; total.value = 0; return; }
+      tableLoading.value = true;
+      try {
+        const data = await JSQ.listText({
+          api_id: apiId.value,
+          page: page.value,
+          page_size: pageSize.value,
+          keyword: keyword.value || '',
+        });
+        list.value = data.list || [];
+        total.value = data.total || 0;
+      } catch (e) {
+        // 拦截器已提示
+      } finally {
+        tableLoading.value = false;
+      }
+    }
+
+    async function loadApiName() {
+      if (!apiId.value) return;
+      try {
+        const row = await JSQ.apiRequest('admin/api/get', { id: apiId.value }, 'GET');
+        apiName.value = row.name || row.path || '';
+      } catch (e) {
+        // 忽略
+      }
+    }
+
+    function onSearch() { page.value = 1; loadList(); }
+    function onPageChange(p) { page.value = p; loadList(); }
+    function reload() { loadList(); }
+
+    function openAdd() {
+      if (!apiId.value) return;
+      editId.value = 0;
+      form.content = '';
+      dialogVisible.value = true;
+    }
+
+    function openEdit(row) {
+      editId.value = row.id;
+      form.content = row.content || '';
+      dialogVisible.value = true;
+    }
+
+    function onDialogClosed() {
+      form.content = '';
+    }
+
+    // 批量导入：计算识别条数
+    function updateBatchTotal() {
+      let text = '';
+      if (batchTab.value === 'file') {
+        text = batchFileName.value ? '' : ''; // file 由 onFileChange 处理
+      } else {
+        text = batchPasteText.value || '';
+      }
+      if (text) {
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+        batchTotal.value = lines.length;
+      } else {
+        batchTotal.value = 0;
+      }
+    }
+
+    function onFileChange(file) {
+      batchFile.value = file.raw;
+      batchFileName.value = file.name;
+      if (!file.raw) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+        batchTotal.value = lines.length;
+      };
+      reader.readAsText(file.raw);
+    }
+
+    function openBatchImport() {
+      if (!apiId.value) return;
+      batchTab.value = 'file';
+      batchFile.value = null;
+      batchFileName.value = '';
+      batchPasteText.value = '';
+      batchSkipDuplicate.value = true;
+      batchTotal.value = 0;
+      batchDialogVisible.value = true;
+    }
+
+    function onBatchDialogClosed() {
+      batchFile.value = null;
+      batchFileName.value = '';
+      batchPasteText.value = '';
+      batchTotal.value = 0;
+    }
+
+    async function onBatchSave() {
+      if (!apiId.value) return;
+      let contents = [];
+      if (batchTab.value === 'file') {
+        if (!batchFile.value) {
+          ElMessage.warning('请先选择文件');
+          return;
+        }
+        const text = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsText(batchFile.value);
+        });
+        contents = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+      } else {
+        if (!batchPasteText.value.trim()) {
+          ElMessage.warning('请粘贴文本内容');
+          return;
+        }
+        contents = batchPasteText.value.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+      }
+      if (contents.length === 0) {
+        ElMessage.warning('未识别到有效素材（每行一条，非空且 ≤5000 字）');
+        return;
+      }
+      if (contents.length > 5000) {
+        ElMessage.warning('一次最多导入 5000 条');
+        return;
+      }
+      batchSaving.value = true;
+      try {
+        const res = await JSQ.apiRequest('admin/text/batch-save', null, 'POST', {
+          api_id: apiId.value,
+          contents: contents,
+          skip_duplicate: batchSkipDuplicate.value,
+        });
+        ElMessage.success(`导入完成：新增 ${res.inserted} 条，跳过 ${res.skipped} 条`);
+        batchDialogVisible.value = false;
+        loadList();
+      } catch (e) {
+        // 拦截器已提示
+      } finally {
+        batchSaving.value = false;
+      }
+    }
+
+    async function onSave() {
+      const content = form.content.trim();
+      if (!content) {
+        ElMessage.warning('内容不能为空');
+        return;
+      }
+      if (content.length > 5000) {
+        ElMessage.warning('内容超长（最大 5000 字）');
+        return;
+      }
+      saving.value = true;
+      try {
+        const payload = { api_id: apiId.value, content: content };
+        if (editId.value) payload.id = editId.value;
+        await JSQ.saveText(payload);
+        ElMessage.success(editId.value ? '编辑成功' : '新增成功');
+        dialogVisible.value = false;
+        loadList();
+      } catch (e) {
+        // 拦截器已提示
+      } finally {
+        saving.value = false;
+      }
+    }
+
+    async function onDelete(row) {
+      try {
+        await ElMessageBox.confirm('确定删除该条素材？', '删除确认', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+        });
+      } catch (e) {
+        return;
+      }
+      try {
+        await JSQ.deleteText(row.id);
+        ElMessage.success('删除成功');
+        // 若当前页删空且非第一页，回退一页
+        if (list.value.length === 1 && page.value > 1) {
+          page.value -= 1;
+        }
+        loadList();
+      } catch (e) {
+        // 拦截器已提示
+      }
+    }
+
+    onMounted(() => {
+      if (!JSQ.getToken()) {
+        ElMessage.warning('请先设置管理员 TOKEN');
+      }
+      const q = new URLSearchParams(location.search);
+      apiId.value = parseInt(q.get('api_id') || '0', 10) || 0;
+      loadApiName();
+      loadList();
+    });
+
+    return {
+      JSQ,
+      apiId, apiName, keyword, list, total, page, pageSize,
+      loading, tableLoading, dialogVisible, editId, saving, form,
+      // 批量导入
+      batchDialogVisible, batchTab, batchFileName, batchPasteText,
+      batchSkipDuplicate, batchSaving, batchTotal,
+      // 移动端
+      isMobile,
+      goBack, onSearch, onPageChange, reload, openAdd, openEdit,
+      onDialogClosed, onSave, onDelete,
+      // 批量导入方法
+      openBatchImport, onBatchDialogClosed, onBatchSave, onFileChange,
+    };
+  },
+}).use(ElementPlus);
+
+// 注册图标组件（支持 :icon="'Search'" 等字符串写法）
+if (window.ElementPlusIconsVue) {
+  for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
+    app.component(name, comp);
+  }
+}
+
+// 引入 MessageBox
+window.ElMessageBox = window.ElementPlus.ElMessageBox;
+if (window.ElementPlus.ElMessageBox) {
+  app.config.globalProperties.$msgbox = window.ElementPlus.ElMessageBox;
+}
+
+app.mount('#app');
+</script>
+</body>
+</html>
