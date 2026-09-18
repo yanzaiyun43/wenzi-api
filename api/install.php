@@ -468,15 +468,19 @@ if (!$submitted) {
     --c-warn-bg:#F7F4EC; --c-warn-tx:#7A6A3C; --c-warn-bd:#E8E0CC;
   }
   *{box-sizing:border-box}
-  html,body{margin:0;padding:0;background:var(--c-page);color:var(--c-text);
+  html,body{margin:0;padding:0;min-height:100vh;background:var(--c-page);color:var(--c-text);
     font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",-apple-system,sans-serif;font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}
   code{font-family:"JetBrains Mono",Consolas,"Courier New",monospace}
-  .box{max-width:600px;margin:0 auto;background:var(--c-card);border:1px solid var(--c-border);border-radius:8px;padding:28px 32px;margin-top:40px}
-  h1{font-size:19px;font-weight:600;margin:0 0 4px;letter-spacing:.5px}
-  .sub{color:var(--c-text-3);font-size:13px;margin-bottom:22px}
-  label{display:block;margin:16px 0 6px;font-weight:500;font-size:14px;color:var(--c-text-2)}
-  .hint{color:var(--c-text-3);font-size:12px;font-weight:400}
-  input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;font-family:inherit;background:var(--c-card);color:var(--c-text);transition:border-color .15s}
+  .page{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:48px 20px}
+  .box{width:100%;max-width:460px;background:var(--c-card);border:1px solid var(--c-border);border-radius:8px;padding:28px}
+  h1{font-size:18px;font-weight:600;margin:0 0 6px;letter-spacing:.5px}
+  .sub{color:var(--c-text-3);font-size:13px;margin-bottom:22px;line-height:1.6}
+  .field-group{margin-bottom:22px}
+  .field-group:last-child{margin-bottom:0}
+  .group-title{font-size:12px;font-weight:600;color:var(--c-text-3);text-transform:uppercase;letter-spacing:.5px;margin:0 0 10px;padding-bottom:6px;border-bottom:1px solid var(--c-border-light)}
+  label{display:block;margin:0 0 6px;font-weight:500;font-size:14px;color:var(--c-text-2)}
+  .hint{color:var(--c-text-3);font-size:12px;font-weight:400;margin-left:2px}
+  input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;font-family:inherit;background:var(--c-card);color:var(--c-text);transition:border-color .15s;margin-top:0}
   input:focus,textarea:focus{outline:none;border-color:var(--c-primary);box-shadow:0 0 0 1px var(--c-primary) inset}
   textarea{min-height:64px;resize:vertical}
   .row{display:flex;gap:8px}
@@ -485,28 +489,35 @@ if (!$submitted) {
   .pw-wrap input{padding-right:40px}
   .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--c-text-3);cursor:pointer;font-size:13px;padding:4px}
   .eye:hover{color:var(--c-primary)}
-  button{background:var(--c-primary);color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:20px;transition:background .15s}
-  button:hover{background:var(--c-primary-dark)}
-  .btn-mini{background:var(--c-card);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px;white-space:nowrap;margin-top:0;transition:background .15s}
+  .btn-row{display:flex;gap:8px;margin-top:24px}
+  button.btn{flex:1;background:var(--c-primary);color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;transition:background .15s}
+  button.btn:hover{background:var(--c-primary-dark)}
+  button.btn-cancel{flex:0 0 auto;background:var(--c-card);color:var(--c-text-2);border:1px solid var(--c-border);padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;transition:background .15s}
+  button.btn-cancel:hover{background:var(--c-hover)}
+  .btn-mini{background:var(--c-card);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px;white-space:nowrap;transition:background .15s}
   .btn-mini:hover{background:var(--c-hover)}
-  .btn-ghost{background:var(--c-card);color:var(--c-text-2);border:1px solid var(--c-border);border-radius:6px;padding:11px 18px;cursor:pointer;font-size:15px;margin-top:20px}
-  .btn-ghost:hover{background:var(--c-hover)}
-  .ok{background:var(--c-ok-bg);color:var(--c-ok-tx);border:1px solid var(--c-ok-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px;white-space:pre-line}
-  .err{background:var(--c-err-bg);color:var(--c-err-tx);border:1px solid var(--c-err-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
-  .warn{background:var(--c-warn-bg);color:var(--c-warn-tx);border:1px solid var(--c-warn-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
-  ul.check{list-style:none;padding:0;margin:12px 0}
+  .ok{background:var(--c-ok-bg);color:var(--c-ok-tx);border:1px solid var(--c-ok-bd);padding:14px 16px;border-radius:6px;font-size:14px;margin-top:0;white-space:pre-line;line-height:1.7}
+  .ok b{display:block;margin-bottom:4px}
+  .err{background:var(--c-err-bg);color:var(--c-err-tx);border:1px solid var(--c-err-bd);padding:14px 16px;border-radius:6px;font-size:14px;margin-bottom:16px}
+  .warn{background:var(--c-warn-bg);color:var(--c-warn-tx);border:1px solid var(--c-warn-bd);padding:14px 16px;border-radius:6px;font-size:14px;margin-bottom:16px}
+  ul.check{list-style:none;padding:0;margin:10px 0 0}
   ul.check li{padding:4px 0;font-size:14px}
   .pass{color:var(--c-ok-tx)}.fail{color:var(--c-danger)}
   code{background:var(--c-hover);padding:1px 6px;border-radius:4px;font-size:13px;word-break:break-all}
-  .radio-row{margin-top:6px}
-  .radio-row label{display:inline;font-weight:400;margin:0 18px 0 0;color:var(--c-text-2)}
-  @media (max-width:480px){.box{padding:20px 16px;margin-top:16px}}
+  .radio-row{display:flex;gap:18px;margin-top:2px}
+  .radio-row label{display:inline-flex;align-items:center;gap:5px;margin:0;font-weight:400;color:var(--c-text-2)}
+  .radio-row input[type=radio]{margin:0}
+  .back{margin-top:16px;text-align:center}
+  .back a{color:var(--c-text-3);font-size:12px;text-decoration:none}
+  .back a:hover{color:var(--c-primary)}
+  @media (max-width:480px){.page{padding:16px 12px}.box{padding:20px 16px}.btn-row{flex-direction:column}.btn-row .btn-cancel{width:100%}}
 </style>
 </head>
 <body>
+<div class="page">
 <div class="box">
-  <h1>旧识桥 api 一键安装</h1>
-  <div class="sub">原生 PHP + SQLite，前后端分离文字 API 管理系统</div>
+  <h1>旧识桥 api 安装</h1>
+  <div class="sub">原生 PHP + SQLite 的文字 API 管理系统，一次填写即可安装</div>
 
   <?php if (!$envOk): ?>
     <div class="err"><b>环境检查未通过</b>
@@ -542,42 +553,55 @@ if (!$submitted) {
           <input type="hidden" name="confirm" value="1">
         <?php endif; ?>
 
-        <label>管理员账号 <span class="hint">3-32 位，字母数字下划线点中划线</span></label>
-        <input type="text" name="admin_user" id="admin_user" value="<?php echo htmlspecialchars($formData['admin_user']); ?>" autocomplete="username" placeholder="例如 boss">
+        <div class="field-group">
+          <div class="group-title">管理员账号</div>
 
-        <label>管理员密码 <span class="hint">8-128 位；登录后台用，也可点右侧随机生成</span></label>
-        <div class="row">
-          <div class="pw-wrap">
-            <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
-            <button type="button" class="eye" onclick="togglePw(this,'admin_pass')" title="显示/隐藏">显示</button>
+          <label>账号 <span class="hint">3-32 位</span></label>
+          <input type="text" name="admin_user" id="admin_user" value="<?php echo htmlspecialchars($formData['admin_user']); ?>" autocomplete="username" placeholder="例如 boss">
+
+          <label>密码 <span class="hint">8-128 位</span></label>
+          <div class="row">
+            <div class="pw-wrap">
+              <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+              <button type="button" class="eye" onclick="togglePw(this,'admin_pass')" title="显示/隐藏">显示</button>
+            </div>
+            <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
           </div>
-          <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
+
+          <label>确认密码</label>
+          <div class="pw-wrap">
+            <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+            <button type="button" class="eye" onclick="togglePw(this,'admin_pass2')" title="显示/隐藏">显示</button>
+          </div>
         </div>
 
-        <label>确认密码</label>
-        <div class="pw-wrap">
-          <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
-          <button type="button" class="eye" onclick="togglePw(this,'admin_pass2')" title="显示/隐藏">显示</button>
+        <div class="field-group">
+          <div class="group-title">接口配置</div>
+
+          <label>允许的前端来源 <span class="hint">逗号分隔，* 表示全部</span></label>
+          <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
+
+          <label>创建示例 API</label>
+          <div class="radio-row">
+            <label><input type="radio" name="sample" value="1" <?php echo $formData['sample'] === '1' ? 'checked' : ''; ?>> 创建</label>
+            <label><input type="radio" name="sample" value="0" <?php echo $formData['sample'] === '0' ? 'checked' : ''; ?>> 不创建</label>
+          </div>
         </div>
 
-        <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
-        <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
-
-        <label>是否创建示例 API</label>
-        <div class="radio-row">
-          <label><input type="radio" name="sample" value="1" <?php echo $formData['sample'] === '1' ? 'checked' : ''; ?>> 是</label>
-          <label><input type="radio" name="sample" value="0" <?php echo $formData['sample'] === '0' ? 'checked' : ''; ?>> 否</label>
+        <div class="btn-row">
+          <?php if ($showConfirm): ?>
+            <button type="submit" name="go" value="confirm" class="btn">确认覆盖安装</button>
+            <button type="submit" name="go" value="cancel" class="btn-cancel">取消</button>
+          <?php else: ?>
+            <button type="submit" class="btn">安装</button>
+          <?php endif; ?>
         </div>
-
-        <?php if ($showConfirm): ?>
-          <button type="submit" name="go" value="confirm">确认覆盖安装</button>
-          <button type="submit" name="go" value="cancel" class="btn-ghost" style="margin-left:8px">取消</button>
-        <?php else: ?>
-          <button type="submit">安装</button>
-        <?php endif; ?>
       </form>
     <?php endif; ?>
   <?php endif; ?>
+
+  <div class="back"><a href="../">返回统计门户</a></div>
+</div>
 </div>
 
 <script>
