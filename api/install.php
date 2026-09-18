@@ -455,28 +455,52 @@ if (!$submitted) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>旧识桥 api 一键安装</title>
+<title>旧识桥 api 安装</title>
 <style>
-  body{font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;background:#f5f6fa;margin:0;padding:24px;color:#2c3e50}
-  .box{max-width:640px;margin:0 auto;background:#fff;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.08);padding:28px 32px}
-  h1{font-size:20px;margin:0 0 4px}
-  .sub{color:#7f8c8d;font-size:13px;margin-bottom:20px}
-  label{display:block;margin:14px 0 6px;font-weight:600;font-size:14px}
-  .hint{color:#95a5a6;font-size:12px;margin-top:4px}
-  input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #d0d7de;border-radius:6px;font-size:14px;font-family:inherit}
-  textarea{min-height:70px}
+  /* 与 admin/css/theme.css 同色板：米白底 #F7F7F5、墨蓝灰主色 #334155、灰边框 #E5E7EB */
+  :root{
+    --c-primary:#334155; --c-primary-dark:#1F2937;
+    --c-border:#E5E7EB; --c-border-light:#EEF0F2;
+    --c-text:#1F2328; --c-text-2:#4B5563; --c-text-3:#6B7280;
+    --c-page:#F7F7F5; --c-card:#FFFFFF; --c-hover:#F3F4F6;
+    --c-danger:#B91C1C; --c-ok-bg:#F0F4F0; --c-ok-tx:#3F5A3F; --c-ok-bd:#D5E0D5;
+    --c-err-bg:#F9EEEE; --c-err-tx:#9E2F2F; --c-err-bd:#E8CFCF;
+    --c-warn-bg:#F7F4EC; --c-warn-tx:#7A6A3C; --c-warn-bd:#E8E0CC;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--c-page);color:var(--c-text);
+    font-family:"PingFang SC","Microsoft YaHei","Noto Sans SC",-apple-system,sans-serif;font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  code{font-family:"JetBrains Mono",Consolas,"Courier New",monospace}
+  .box{max-width:600px;margin:0 auto;background:var(--c-card);border:1px solid var(--c-border);border-radius:8px;padding:28px 32px;margin-top:40px}
+  h1{font-size:19px;font-weight:600;margin:0 0 4px;letter-spacing:.5px}
+  .sub{color:var(--c-text-3);font-size:13px;margin-bottom:22px}
+  label{display:block;margin:16px 0 6px;font-weight:500;font-size:14px;color:var(--c-text-2)}
+  .hint{color:var(--c-text-3);font-size:12px;font-weight:400}
+  input[type=text],input[type=password],textarea{width:100%;box-sizing:border-box;padding:9px 11px;border:1px solid var(--c-border);border-radius:6px;font-size:14px;font-family:inherit;background:var(--c-card);color:var(--c-text);transition:border-color .15s}
+  input:focus,textarea:focus{outline:none;border-color:var(--c-primary);box-shadow:0 0 0 1px var(--c-primary) inset}
+  textarea{min-height:64px;resize:vertical}
   .row{display:flex;gap:8px}
   .row input{flex:1}
-  button{background:#4c6ef5;color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:18px}
-  button:hover{background:#3b5bdb}
-  .btn-mini{background:#e7ecff;color:#3b5bdb;border:1px solid #c7d2ff;border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px;white-space:nowrap}
-  .ok{background:#d3f9d8;color:#1e7d32;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px;white-space:pre-line}
-  .err{background:#ffe3e3;color:#c92a2a;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
-  .warn{background:#fff3bf;color:#b8860b;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
+  .pw-wrap{position:relative;flex:1}
+  .pw-wrap input{padding-right:40px}
+  .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--c-text-3);cursor:pointer;font-size:13px;padding:4px}
+  .eye:hover{color:var(--c-primary)}
+  button{background:var(--c-primary);color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:20px;transition:background .15s}
+  button:hover{background:var(--c-primary-dark)}
+  .btn-mini{background:var(--c-card);color:var(--c-primary);border:1px solid var(--c-primary);border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px;white-space:nowrap;margin-top:0;transition:background .15s}
+  .btn-mini:hover{background:var(--c-hover)}
+  .btn-ghost{background:var(--c-card);color:var(--c-text-2);border:1px solid var(--c-border);border-radius:6px;padding:11px 18px;cursor:pointer;font-size:15px;margin-top:20px}
+  .btn-ghost:hover{background:var(--c-hover)}
+  .ok{background:var(--c-ok-bg);color:var(--c-ok-tx);border:1px solid var(--c-ok-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px;white-space:pre-line}
+  .err{background:var(--c-err-bg);color:var(--c-err-tx);border:1px solid var(--c-err-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
+  .warn{background:var(--c-warn-bg);color:var(--c-warn-tx);border:1px solid var(--c-warn-bd);padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
   ul.check{list-style:none;padding:0;margin:12px 0}
   ul.check li{padding:4px 0;font-size:14px}
-  .pass{color:#2f9e44}.fail{color:#c92a2a}
-  code{background:#f1f3f5;padding:1px 6px;border-radius:4px;font-size:13px;word-break:break-all}
+  .pass{color:var(--c-ok-tx)}.fail{color:var(--c-danger)}
+  code{background:var(--c-hover);padding:1px 6px;border-radius:4px;font-size:13px;word-break:break-all}
+  .radio-row{margin-top:6px}
+  .radio-row label{display:inline;font-weight:400;margin:0 18px 0 0;color:var(--c-text-2)}
+  @media (max-width:480px){.box{padding:20px 16px;margin-top:16px}}
 </style>
 </head>
 <body>
@@ -518,32 +542,38 @@ if (!$submitted) {
           <input type="hidden" name="confirm" value="1">
         <?php endif; ?>
 
-        <label>管理员账号 <span class="hint">3-32 位字母数字下划线点中划线</span></label>
-        <input type="text" name="admin_user" id="admin_user" value="<?php echo htmlspecialchars($formData['admin_user']); ?>" autocomplete="username">
+        <label>管理员账号 <span class="hint">3-32 位，字母数字下划线点中划线</span></label>
+        <input type="text" name="admin_user" id="admin_user" value="<?php echo htmlspecialchars($formData['admin_user']); ?>" autocomplete="username" placeholder="例如 boss">
 
-        <label>管理员密码 <span class="hint">8-128 位，登录后台用</span></label>
+        <label>管理员密码 <span class="hint">8-128 位；登录后台用，也可点右侧随机生成</span></label>
         <div class="row">
-          <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+          <div class="pw-wrap">
+            <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+            <button type="button" class="eye" onclick="togglePw(this,'admin_pass')" title="显示/隐藏">👁</button>
+          </div>
           <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
         </div>
 
         <label>确认密码</label>
-        <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+        <div class="pw-wrap">
+          <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+          <button type="button" class="eye" onclick="togglePw(this,'admin_pass2')" title="显示/隐藏">👁</button>
+        </div>
 
         <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
         <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
 
         <label>是否创建示例 API</label>
-        <div style="margin-top:6px">
-          <label style="display:inline;font-weight:400;margin-right:20px"><input type="radio" name="sample" value="1" <?php echo $formData['sample'] === '1' ? 'checked' : ''; ?>> 是</label>
-          <label style="display:inline;font-weight:400"><input type="radio" name="sample" value="0" <?php echo $formData['sample'] === '0' ? 'checked' : ''; ?>> 否</label>
+        <div class="radio-row">
+          <label><input type="radio" name="sample" value="1" <?php echo $formData['sample'] === '1' ? 'checked' : ''; ?>> 是</label>
+          <label><input type="radio" name="sample" value="0" <?php echo $formData['sample'] === '0' ? 'checked' : ''; ?>> 否</label>
         </div>
 
         <?php if ($showConfirm): ?>
           <button type="submit" name="go" value="confirm">确认覆盖安装</button>
-          <button type="submit" name="go" value="cancel" style="background:#adb5bd">取消</button>
+          <button type="submit" name="go" value="cancel" class="btn-ghost" style="margin-left:8px">取消</button>
         <?php else: ?>
-          <button type="submit">一键安装</button>
+          <button type="submit">安装</button>
         <?php endif; ?>
       </form>
     <?php endif; ?>
@@ -551,6 +581,10 @@ if (!$submitted) {
 </div>
 
 <script>
+function togglePw(btn,id){
+  var el=document.getElementById(id);
+  el.type = el.type==='password' ? 'text' : 'password';
+}
 function randPass(){
   // 字母表 60 个字符（已去除易混淆的 0/O/1/l/i），用 random_int 等价方式生成
   // crypto.getRandomValues 返回 0-255，对 60 取模有偏差；改用 16-bit 拒绝采样消除：
@@ -570,7 +604,7 @@ function randPass(){
   document.getElementById('admin_pass2').value=s;
 }
 function validateForm(){
-  var u=document.getElementById('admin_user').value;
+  var u=document.getElementById('admin_user').value.trim();
   var p=document.getElementById('admin_pass').value;
   var p2=document.getElementById('admin_pass2').value;
   if(!/^[a-zA-Z0-9_.-]{3,32}$/.test(u)){alert('管理员账号需 3-32 位字母数字下划线点中划线');return false;}
