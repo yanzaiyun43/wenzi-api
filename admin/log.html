@@ -18,6 +18,7 @@
   .log-card .h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; }
   .log-card .h .k { color: var(--el-text-color-secondary); }
   .log-card .params { max-height: 90px; overflow: auto; font-size: 12px; }
+  .log-card .result { font-size: 12px; color: var(--el-text-color-secondary); }
 </style>
 </head>
 <body>
@@ -57,6 +58,9 @@
         <el-table-column label="参数" min-width="260">
           <template #default="{ row }"><div class="params">{{ row.params }}</div></template>
         </el-table-column>
+        <el-table-column label="返回文本" min-width="260">
+          <template #default="{ row }"><div class="params">{{ row.result || '-' }}</div></template>
+        </el-table-column>
       </el-table>
 
       <!-- 移动端卡片 -->
@@ -69,6 +73,12 @@
           </div>
           <div class="h"><span class="k">时间</span><span>{{ JSQ.fmtTime(row.call_time) }}</span></div>
           <div class="params">{{ row.params }}</div>
+          <div class="h"><span class="k">返回</span><span class="result">{{ row.result || '-' }}</span></div>
+        </div>
+        <div class="pager" style="justify-content:center">
+          <el-pagination background layout="total, prev, pager, next"
+            :total="total" :page-size="query.page_size" :current-page="query.page"
+            @current-change="onPageChange"></el-pagination>
         </div>
       </div>
 

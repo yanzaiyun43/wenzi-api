@@ -134,15 +134,30 @@ function db_init_tables(PDO $pdo)
         FOREIGN KEY(api_id) REFERENCES api_config(id) ON DELETE CASCADE
     )");
 
-    // 3. api_log 调用日志表
+    // 3. api_log 调用日志表（result 记录本次调用返回的文本，便于后台查看）
     $pdo->exec("CREATE TABLE IF NOT EXISTS api_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         api_id INTEGER,
         ip TEXT,
         call_time INTEGER,
         params TEXT,
+        result TEXT DEFAULT '',
         FOREIGN KEY(api_id) REFERENCES api_config(id) ON DELETE SET NULL
     )");
+
+    // 旧库迁移：api_log 增加 result 列（已存在则跳过，幂等）。
+    // 列存在性通过 PRAGMA table_info 判断，避免重复 ALTER 报错。
+    $colSt = $pdo->query('PRAGMA table_info(api_log)');
+    $hasResult = false;
+    while ($colRow = $colSt->fetch(PDO::FETCH_ASSOC)) {
+        if ((string)$colRow['name'] === 'result') {
+            $hasResult = true;
+            break;
+        }
+    }
+    if (!$hasResult) {
+        $pdo->exec("ALTER TABLE api_log ADD COLUMN result TEXT DEFAULT ''");
+    }
 
     // 4. admin_user 管理员账号表（账号 + 密码哈希，取代固定 TOKEN）
     $pdo->exec("CREATE TABLE IF NOT EXISTS admin_user (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        username TEXT NOT NULL UNIQUE,\n        password_hash TEXT NOT NULL,\n        create_time INTEGER NOT NULL,\n        update_time INTEGER NOT NULL\n    )");

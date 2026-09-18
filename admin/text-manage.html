@@ -79,6 +79,11 @@
             <el-button size="small" text class="danger-text" @click="onDelete(row)">删除</el-button>
           </div>
         </div>
+        <div class="pager" style="justify-content:center">
+          <el-pagination background layout="total, prev, pager, next"
+            :total="total" :page-size="pageSize" :current-page="page"
+            @current-change="onPageChange"></el-pagination>
+        </div>
       </div>
 
       <div class="pager" v-show="!isMobile">

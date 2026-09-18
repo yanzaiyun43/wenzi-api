@@ -10,10 +10,12 @@
   - `random_text`：从素材池随机返回一条
   - `template`：模板变量替换，如 `你好，{{name}}！`
 - **管理后台**：接口 CRUD、素材管理、调用日志（含 IP、时间、参数）
-- **账号密码登录**：后台用管理员账号 + 密码登录换取会话令牌，不再是固定 TOKEN；同一 IP 连续失败会限速
+- **账号密码登录**：后台用管理员账号 + 密码登录换取 64 位会话令牌（哈希存库），不再是固定 TOKEN；同一 IP 15 分钟内失败 5 次会限流 15 分钟
+- **改密即踢下线**：修改密码后，同一账号在其他设备上的会话立即失效，仅当前设备保持登录
 - **统计门户**：根路径展示调用统计，并列出全部可调用接口，带一键复制
 - **对外调用无需密钥**：地址即接口，谁拿到都能调（按需在后台禁用即可停止对外服务）
 - **数据库锁重试**：SQLite 并发写入自动重试（5 次递增退避）
+- **调用日志自动清理**：按概率触发、单次最多删 1000 行，避免大库首次清理长时间占写锁
 
 ## 目录结构
 
@@ -57,7 +59,7 @@
 https://你的域名/api/install.php
 ```
 
-按表单填写管理员账号和密码（可点「随机生成」），提交后：
+表单默认已带一个随机生成的 20 位密码（可点「随机生成」换一个，也可手输），填账号密码并提交后：
 
 1. 生成 `api/config.php`
 2. 创建 `api/api.db` 并建六张表
@@ -93,10 +95,11 @@ php api/install.php \
 访问 `/admin/`：
 
 - 已安装但还没有管理员账号，则显示「初始化管理员账号」，设置后直接进入
-- 已有账号，则账号 + 密码登录，会话默认 7 天（`ADMIN_SESSION_TTL`）
-- 登录后右上角可「修改密码」「退出登录」
+- 已有账号，则账号 + 密码登录，会话默认 7 天（`ADMIN_SESSION_TTL`），滑动续期（剩余不足一半时刷新）
+- 登录后右上角可「修改密码」「退出登录」；修改密码会立即失效该账号在其他设备上的会话，当前设备保持登录
+- 同一 IP 15 分钟内登录失败 5 次会被限流 15 分钟（返回 429），改密失败不计入该计数
 
-会话令牌保存在浏览器 `localStorage`，请求时通过 `X-Admin-Token` 头传递（兼容 `Authorization: Bearer <token>`）。
+会话令牌保存在浏览器 `localStorage`，请求时通过 `X-Admin-Token` 头传递（兼容 `Authorization: Bearer <token>`）。令牌 64 位十六进制，数据库只存它的 SHA-256 摘要。
 
 ### 管理接口
 
@@ -186,6 +189,41 @@ GET /api/index.php?route=runtime&path=hello&name=张三
 
 CORS：`api/config.php` 中的 `$ALLOWED_ORIGINS` 控制，数组形式，`'*'` 表示全部放行。
 
+### 两种接口类型对比
+
+| 类型 | `content` 含义 | 调用方式 | 说明 |
+|---|---|---|---|
+| `random_text` | 忽略（素材存在素材池） | `?route=runtime&path=daily` | 从该接口的素材池随机取一条返回 |
+| `template` | 含 `{{变量}}` 的模板文本 | `?route=runtime&path=hello&name=张三` | 把 `{{name}}` 替换为同名查询参数值 |
+
+**随机文字（`random_text`）**——不需要传参数：
+
+```text
+GET /api/index.php?route=runtime&path=daily
+```
+
+返回示例：
+
+```text
+今天也要加油哦！
+```
+
+**模板（`template`）**——变量名就是查询参数名：
+
+1. 后台建接口时，`content` 写含 `{{name}}`、`{{date}}` 等占位符的模板文本
+2. 调用时带上同名查询参数，参数值会替换对应占位符；没传的参数替换为空字符串
+3. 变量名限 `[a-zA-Z0-9_]{1,32}`，占位符允许前后空白（`{{ name }}` 也识别）
+
+```text
+GET /api/index.php?route=runtime&path=hello&name=张三
+```
+
+```
+你好，张三！
+```
+
+鉴权、路由控制类参数名（`key`、`token`、`route`、`path` 等及其大小写、连字符变体）默认被拦截表挡住，不能用作模板变量回显，也不会写进调用日志；拦截表可配置（见下方「配置」）。
+
 ## 配置
 
 编辑 `api/config.php`：
@@ -196,6 +234,13 @@ define('DB_PATH', __DIR__ . '/api.db');
 define('TRUST_X_FORWARDED_FOR', false);  // 是否信任 X-Forwarded-For
 define('LOG_RETENTION_DAYS', 90);        // 调用日志保留天数，0 表示不清理
 define('ADMIN_SESSION_TTL', 604800);     // 后台登录会话有效期（秒），默认 7 天
+
+// 模板参数拦截表：默认拦截 key/token/route/path 等鉴权、路由控制参数名，
+// 可按需追加：
+define('RUNTIME_EXTRA_BLOCKED_PARAMS', array('secret', 'callback'));
+
+// 模板回显白名单：某个参数名即使命中拦截表也允许回显（默认关闭，慎用）：
+define('RUNTIME_ALLOW_TEMPLATE_PARAMS', array('callback'));
 ```
 
 管理员账号与密码不在配置文件里（只存数据库哈希），在后台登录页或「修改密码」处维护。
@@ -215,11 +260,13 @@ SQLite，位于 `api/api.db`。六张表：
 
 ## 安全提示
 
-- 后台账号密码请设置得足够强；忘记密码可删 `api/install.lock` 后重装重置
-- 安装完成后删除 `api/install.php`（或保留 `install.lock`）
-- 对外接口无需密钥，属于公开服务：不要在素材里放隐私内容，必要时在后台禁用接口
+- 后台账号密码请设置得足够强；忘记密码可删 `api/install.lock` 后重装重置（业务数据保留，账号密码重置）
+- 安装完成后删除 `api/install.php`（或保留 `install.lock`）；删除 `install.lock` 可重装
+- 对外接口无需密钥，属于公开服务：不要在素材里放隐私内容，必要时在后台禁用接口（禁用后不出现在接口清单里，调用返回 403）
 - 关闭 `$ALLOWED_ORIGINS = ['*']`，改为具体域名（该限制只作用于浏览器跨域，不阻止直接调用）
-- 若前面有反向代理（Nginx / Caddy），设置 `TRUST_X_FORWARDED_FOR = true` 以获取真实 IP
+- 若前面有反向代理（Nginx / Caddy），设置 `TRUST_X_FORWARDED_FOR = true` 以获取真实 IP（登录限速也依赖该 IP，代理环境下务必开启，否则限速按代理 IP 计算）
+- 模板回显白名单 `RUNTIME_ALLOW_TEMPLATE_PARAMS` 默认关闭；确需放开某个被拦截的参数名时才配置，放开即使命中拦截表也回显
+- 调用日志默认保留 90 天（`LOG_RETENTION_DAYS`），按概率触发清理、单次最多删 1000 行
 
 ## License
 

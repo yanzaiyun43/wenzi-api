@@ -1094,7 +1094,7 @@ function admin_log_list()
     $st->execute($params);
     $total = (int)$st->fetchColumn();
 
-    $sql = "SELECT id, api_id, ip, call_time, params FROM api_log $whereSql ORDER BY id DESC LIMIT :lim OFFSET :off";
+    $sql = "SELECT id, api_id, ip, call_time, params, result FROM api_log $whereSql ORDER BY id DESC LIMIT :lim OFFSET :off";
     $st = $pdo->prepare($sql);
     foreach ($params as $k => $v) {
         $st->bindValue($k, $v);

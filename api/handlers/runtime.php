@@ -153,8 +153,8 @@ function runtime_run()
         fastcgi_finish_request();
     }
 
-    // ---------- 7. 写调用日志（失败忽略，鉴权类参数已排除）----------
-    runtime_write_log($pdo, $apiId);
+    // ---------- 7. 写调用日志（失败忽略，鉴权类参数已排除，含返回文本）----------
+    runtime_write_log($pdo, $apiId, $output);
 
     exit;
 }
@@ -210,9 +210,10 @@ function runtime_random_text($pdo, $apiId)
  * 写调用日志（失败忽略）。
  * params 记录 GET 参数，拦截表统一来自 runtime_blocked_params()，
  * 与模板回显共用同一份配置，避免两处维护不一致。
- * 最大长度 2000，超出截断。IP 默认 REMOTE_ADDR，除非 TRUST_X_FORWARDED_FOR 开启。
+ * result 记录本次调用成功返回的文本（截断 2000，UTF-8 边界）。
+ * params / result 最大长度 2000，超出截断。IP 默认 REMOTE_ADDR，除非 TRUST_X_FORWARDED_FOR 开启。
  */
-function runtime_write_log($pdo, $apiId)
+function runtime_write_log($pdo, $apiId, $result = '')
 {
     // 脱敏：只记录业务查询参数，不记录任何鉴权、路由控制参数。
     // 键名统一转小写后比较，避免大小写变体绕过脱敏。
@@ -234,6 +235,9 @@ function runtime_write_log($pdo, $apiId)
     }
     $paramsStr = utf8_truncate_bytes($paramsStr, 2000);
 
+    // 记录本次调用成功返回的文本，便于后台日志查看；按 UTF-8 边界截断 2000 字节。
+    $resultStr = utf8_truncate_bytes((string)$result, 2000);
+
     // IP
     $ip = isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '';
     if (defined('TRUST_X_FORWARDED_FOR') && TRUST_X_FORWARDED_FOR && isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
@@ -245,12 +249,13 @@ function runtime_write_log($pdo, $apiId)
 
     // 写日志失败忽略，不影响主接口
     try {
-        $st = $pdo->prepare('INSERT INTO api_log (api_id, ip, call_time, params) VALUES (:api_id, :ip, :call_time, :params)');
+        $st = $pdo->prepare('INSERT INTO api_log (api_id, ip, call_time, params, result) VALUES (:api_id, :ip, :call_time, :params, :result)');
         $st->execute(array(
             ':api_id'    => $apiId,
             ':ip'        => $ip,
             ':call_time' => time(),
             ':params'    => $paramsStr,
+            ':result'    => $resultStr,
         ));
         runtime_prune_logs($pdo);
     } catch (PDOException $e) {
