@@ -19,6 +19,11 @@
   .log-card .h .k { color: var(--el-text-color-secondary); }
   .log-card .params { max-height: 90px; overflow: auto; font-size: 12px; }
   .log-card .result { font-size: 12px; color: var(--el-text-color-secondary); }
+
+  .m-pager { text-align: center; margin-top: 16px; }
+  .m-pager .m-pager-info { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 10px; }
+  .m-pager .m-pager-btns { display: flex; justify-content: center; gap: 10px; }
+  .m-pager .m-pager-btns button { min-width: 88px; }
 </style>
 </head>
 <body>
@@ -75,10 +80,12 @@
           <div class="params">{{ row.params }}</div>
           <div class="h"><span class="k">返回</span><span class="result">{{ row.result || '-' }}</span></div>
         </div>
-        <div class="pager" style="justify-content:center">
-          <el-pagination background layout="total, prev, pager, next"
-            :total="total" :page-size="query.page_size" :current-page="query.page"
-            @current-change="onPageChange"></el-pagination>
+        <div class="m-pager">
+          <div class="m-pager-info">共 {{ total }} 条 · 第 {{ query.page }}/{{ totalPages }} 页</div>
+          <div class="m-pager-btns">
+            <el-button :disabled="query.page <= 1" @click="goPrev">上一页</el-button>
+            <el-button :disabled="query.page >= totalPages" @click="goNext">下一页</el-button>
+          </div>
         </div>
       </div>
 
@@ -92,7 +99,7 @@
 </div>
 
 <script>
-const { createApp, ref, reactive, onMounted, onBeforeUnmount } = Vue;
+const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
 
 const app = createApp({
   setup() {
@@ -100,6 +107,9 @@ const app = createApp({
     const apiId = ref(0);
     const list = ref([]);
     const total = ref(0);
+    const totalPages = computed(() => Math.max(1, Math.ceil(total.value / (query.page_size || 20))));
+    function goPrev() { if (query.page > 1) onPageChange(query.page - 1); }
+    function goNext() { if (query.page < totalPages.value) onPageChange(query.page + 1); }
     const tableLoading = ref(false);
     const timeRange = ref([]);
     const query = reactive({ ip: '', page: 1, page_size: 20 });
@@ -180,7 +190,7 @@ const app = createApp({
       loadList();
     });
 
-    return { JSQ, apiId, list, total, tableLoading, timeRange, query, goBack, onSearch, onPageChange, reload, onClear, isMobile };
+    return { JSQ, apiId, list, total, totalPages, goPrev, goNext, tableLoading, timeRange, query, goBack, onSearch, onPageChange, reload, onClear, isMobile };
   },
 }).use(ElementPlus);
 

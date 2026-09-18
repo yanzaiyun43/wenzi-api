@@ -25,6 +25,11 @@
   .text-card .h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .text-card .content { white-space: pre-wrap; word-break: break-word; color: var(--el-text-color-regular); font-size: 13px; line-height: 1.65; }
   .text-card .ops { display: flex; gap: 8px; margin-top: 10px; }
+
+  .m-pager { text-align: center; margin-top: 16px; }
+  .m-pager .m-pager-info { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 10px; }
+  .m-pager .m-pager-btns { display: flex; justify-content: center; gap: 10px; }
+  .m-pager .m-pager-btns button { min-width: 88px; }
 </style>
 </head>
 <body>
@@ -79,10 +84,12 @@
             <el-button size="small" text class="danger-text" @click="onDelete(row)">删除</el-button>
           </div>
         </div>
-        <div class="pager" style="justify-content:center">
-          <el-pagination background layout="total, prev, pager, next"
-            :total="total" :page-size="pageSize" :current-page="page"
-            @current-change="onPageChange"></el-pagination>
+        <div class="m-pager">
+          <div class="m-pager-info">共 {{ total }} 条 · 第 {{ page }}/{{ totalPages }} 页</div>
+          <div class="m-pager-btns">
+            <el-button :disabled="page <= 1" @click="goPrev">上一页</el-button>
+            <el-button :disabled="page >= totalPages" @click="goNext">下一页</el-button>
+          </div>
         </div>
       </div>
 
@@ -138,7 +145,7 @@
 </div>
 
 <script>
-const { createApp, ref, reactive, onMounted, onBeforeUnmount } = Vue;
+const { createApp, ref, reactive, computed, onMounted, onBeforeUnmount } = Vue;
 
 const app = createApp({
   setup() {
@@ -150,6 +157,9 @@ const app = createApp({
     const total = ref(0);
     const page = ref(1);
     const pageSize = ref(20);
+    const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)));
+    function goPrev() { if (page.value > 1) onPageChange(page.value - 1); }
+    function goNext() { if (page.value < totalPages.value) onPageChange(page.value + 1); }
     const tableLoading = ref(false);
     const dialogVisible = ref(false);
     const editId = ref(0);
@@ -371,7 +381,7 @@ const app = createApp({
       JSQ, apiId, apiName, keyword, list, total, page, pageSize, tableLoading,
       dialogVisible, editId, saving, form,
       batchDialogVisible, batchTab, batchFileName, batchPasteText, batchSkipDuplicate,
-      batchSaving, batchTotal, batchInvalid, isMobile,
+      batchSaving, batchTotal, batchInvalid, isMobile, totalPages, goPrev, goNext,
       goBack, onSearch, onPageChange, reload, openAdd, openEdit,
       onDialogClosed, onContentInput, onSave, onDelete,
       updateBatchTotal, openBatchImport, onBatchDialogClosed, onBatchSave, onFileChange,
