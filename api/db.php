@@ -160,12 +160,16 @@ function db_init_tables(PDO $pdo)
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_admin_session_expire ON admin_session(expire_time)');
 
     // “跳过重复”需要数据库最终兜底。旧库首次迁移时保留每组最早记录后创建唯一索引。
+    // 该迁移在已存在的业务库上可能一次性删除大量重复行（百万级），
+    // 必须放进事务原子完成：删除中途失败自动回滚，避免留下“部分清理+索引缺失”的半套状态。
     $indexName = 'idx_api_text_api_content_unique';
     $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :name LIMIT 1");
     $st->execute(array(':name' => $indexName));
     if ($st->fetchColumn() === false) {
-        $pdo->exec('DELETE FROM api_text WHERE id NOT IN (SELECT MIN(id) FROM api_text GROUP BY api_id, content)');
-        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_text_api_content_unique ON api_text(api_id, content)');
+        db_transaction($pdo, function ($pdo) {
+            $pdo->exec('DELETE FROM api_text WHERE id NOT IN (SELECT MIN(id) FROM api_text GROUP BY api_id, content)');
+            $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_text_api_content_unique ON api_text(api_id, content)');
+        });
     }
 }
 

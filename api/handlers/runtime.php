@@ -15,6 +15,13 @@
  *   5. 成功返回纯文本（text/plain），失败返回 JSON
  *   6. 写调用日志（鉴权类参数不进日志，截断 2000），失败忽略
  *
+ * 参数过滤：模板回显与日志脱敏共用 runtime_blocked_params() 拦截表，
+ * 默认拦截所有鉴权 / 路由控制参数（key/token/admin-token/route/path 等
+ * 及其大小写、连字符变体）。部署方在 config.php 里：
+ *   - define('RUNTIME_EXTRA_BLOCKED_PARAMS', array('xxx')) 追加拦截项；
+ *   - define('RUNTIME_ALLOW_TEMPLATE_PARAMS', array('xxx')) 对单个名放开
+ *     回显白名单（命中白名单即使命中拦截表也放行，不推荐，需配合业务）。
+ *
  * 禁止 eval / 动态 include / 执行任何用户输入代码。
  * 输出最大长度 1MB。
  * ----------------------------------------------------------------
@@ -40,6 +47,53 @@ if (!function_exists('json_error')) {
         ), JSON_UNESCAPED_UNICODE);
         exit;
     }
+}
+
+/**
+ * 模板回显 / 日志脱敏共用的参数拦截表。
+ * 键名统一小写，避免大小写变体绕过。每次请求缓存一份。
+ */
+function runtime_blocked_params(): array
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $base = array(
+        // 旧���钥兼容参数（已废弃但调用方可能仍携带）
+        'key', 'api-key', 'api_key', 'x-api-key',
+        // 会话 / 鉴权
+        'token', 'access-token', 'access_token',
+        'admin-token', 'admin_token', 'authorization',
+        // 路由控制
+        'route', 'path',
+    );
+
+    // 部署方可追加拦截项
+    if (defined('RUNTIME_EXTRA_BLOCKED_PARAMS') && is_array(RUNTIME_EXTRA_BLOCKED_PARAMS)) {
+        foreach (RUNTIME_EXTRA_BLOCKED_PARAMS as $p) {
+            $base[] = strtolower(trim((string)$p));
+        }
+    }
+
+    $cache = array_values(array_unique(array_map('strtolower', $base)));
+    return $cache;
+}
+
+/** 模板允许回显的 GET 参数白名单（默认空 = 全部走拦截表判断）。 */
+function runtime_allowed_template_params(): array
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    if (defined('RUNTIME_ALLOW_TEMPLATE_PARAMS') && is_array(RUNTIME_ALLOW_TEMPLATE_PARAMS)) {
+        $cache = array_values(array_unique(array_map('strtolower', RUNTIME_ALLOW_TEMPLATE_PARAMS)));
+    } else {
+        $cache = array();
+    }
+    return $cache;
 }
 
 /**
@@ -79,7 +133,7 @@ function runtime_run()
     $output = '';
     if ($type === 'template') {
         $content = (string)$api['content'];
-        $output = runtime_replace_template($content);
+        $output = runtime_replace_template($content, $apiId);
     } elseif ($type === 'random_text') {
         $output = runtime_random_text($pdo, $apiId);
     } else {
@@ -108,22 +162,26 @@ function runtime_run()
 /**
  * template：替换 {{参数名}}。
  * 变量名 [a-zA-Z0-9_]{1,32}，使用 preg_replace_callback；
- * 未传参数替换为空字符串；不执行任何用户输入代码。
+ * 命中拦截表（含大小写变体）替换为空字符串；未传参替换为空；
+ * 白名单参数即使命中拦截表也放行（部署方显式配置才生效）。
+ * 不执行任何用户输入代码。
  */
-function runtime_replace_template($content)
+function runtime_replace_template($content, $apiId)
 {
+    $blocked = runtime_blocked_params();
+    $allowed = runtime_allowed_template_params();
+
     return preg_replace_callback(
         '#\{\{\s*([a-zA-Z0-9_]{1,32})\s*\}\}#',
-        function ($m) {
+        function ($m) use ($blocked, $allowed) {
             $name = $m[1];
-            // 这些参数用于鉴权或路由控制，禁止被模板回显。
-            $reserved = array(
-                'key', 'api-key', 'x-api-key', 'api_key',
-                'token', 'access-token', 'access_token',
-                'admin-token', 'admin_token', 'authorization',
-                'route', 'path'
-            );
-            if (in_array(strtolower($name), $reserved, true)) {
+            $lname = strtolower($name);
+
+            // 白名单优先：部署方显式放开的参数即使命中拦截表也回显。
+            if (!empty($allowed) && in_array($lname, $allowed, true)) {
+                return isset($_GET[$name]) ? (string)$_GET[$name] : '';
+            }
+            if (in_array($lname, $blocked, true)) {
                 return '';
             }
             return isset($_GET[$name]) ? (string)$_GET[$name] : '';
@@ -150,19 +208,15 @@ function runtime_random_text($pdo, $apiId)
 
 /**
  * 写调用日志（失败忽略）。
- * params 记录 GET 参数，但排除 key / route / admin-token / X-API-Key；
+ * params 记录 GET 参数，拦截表统一来自 runtime_blocked_params()，
+ * 与模板回显共用同一份配置，避免两处维护不一致。
  * 最大长度 2000，超出截断。IP 默认 REMOTE_ADDR，除非 TRUST_X_FORWARDED_FOR 开启。
  */
 function runtime_write_log($pdo, $apiId)
 {
     // 脱敏：只记录业务查询参数，不记录任何鉴权、路由控制参数。
     // 键名统一转小写后比较，避免大小写变体绕过脱敏。
-    $exclude = array(
-        'key', 'api-key', 'api_key', 'x-api-key',
-        'token', 'access-token', 'access_token',
-        'admin-token', 'admin_token', 'authorization',
-        'route', 'path'
-    );
+    $exclude = runtime_blocked_params();
     $params = array();
     foreach ($_GET as $k => $v) {
         $kk = strtolower(trim((string)$k));

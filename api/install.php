@@ -44,12 +44,12 @@ if (file_exists($lockFile)) {
 // —— 自动生成密码工具 ——
 function install_rand_password($len = 20)
 {
-    // 使用 random_bytes 保证强度（PHP>=7.0 均可用）
+    // random_int 保证每个字符在字母表内均匀分布，无模运算偏差（PHP>=7.0 均可用）
     $alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    $bytes = random_bytes($len);
+    $max = strlen($alphabet) - 1;
     $out = '';
     for ($i = 0; $i < $len; $i++) {
-        $out .= $alphabet[ord($bytes[$i]) % strlen($alphabet)];
+        $out .= $alphabet[random_int(0, $max)];
     }
     return $out;
 }
@@ -523,12 +523,12 @@ if (!$submitted) {
 
         <label>管理员密码 <span class="hint">8-128 位，登录后台用</span></label>
         <div class="row">
-          <input type="text" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+          <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
           <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
         </div>
 
         <label>确认密码</label>
-        <input type="text" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+        <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
 
         <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
         <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
@@ -552,9 +552,20 @@ if (!$submitted) {
 
 <script>
 function randPass(){
-  var a='abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='';
-  var c=crypto.getRandomValues(new Uint8Array(20));
-  for(var i=0;i<20;i++){s+=a[c[i]%a.length];}
+  // 字母表 60 个字符（已去除易混淆的 0/O/1/l/i），用 random_int 等价方式生成
+  // crypto.getRandomValues 返回 0-255，对 60 取模有偏差；改用 16-bit 拒绝采样消除：
+  // 每次取两个字节拼成 16-bit (0-65535)，若 >= 65536 - (65536%60) 则丢弃重取。
+  var a='abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  var limit = 65536 - (65536 % a.length); // 65536 % 60 = 16, limit = 65520
+  var s='';
+  var need = 20;
+  while(s.length < need){
+    var bytes = crypto.getRandomValues(new Uint8Array(2));
+    var v = (bytes[0] << 8) | bytes[1];
+    if(v < limit){
+      s += a[v % a.length];
+    }
+  }
   document.getElementById('admin_pass').value=s;
   document.getElementById('admin_pass2').value=s;
 }

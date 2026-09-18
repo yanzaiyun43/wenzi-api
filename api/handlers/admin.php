@@ -8,7 +8,9 @@
  *   - 文字素材：admin/text/list、save、delete、batch-delete
  *   - 访问日志：admin/log/list、clear
  *
- * 鉴权：请求头 X-Admin-Token（兼容 Authorization: Bearer），hash_equals 比较。
+ * 鉴权：账号 + 密码登录换取 64 位会话令牌（哈希存 admin_session），
+ * 后续请求经请求头 X-Admin-Token（兼容 Authorization: Bearer）携带；
+ * 对外 runtime 调用无需任何密钥。
  * 读操作 GET，写操作 POST。失败（鉴权/参数）延迟 300ms 防爆破。
  * 所有 SQL 走 PDO 预处理。
  * ----------------------------------------------------------------
@@ -243,8 +245,11 @@ function admin_auth_init()
 
     $pdo = db_connect();
     $now = time();
+    // 并发防护：两个 tab 同时点初始化时，后到的 INSERT 会被 NOT EXISTS 挡住，
+    // 不依赖"先 count 再 insert"的 TOCTOU 窗口；失败时返回 409 而非 500。
     $st = $pdo->prepare('INSERT INTO admin_user (username, password_hash, create_time, update_time)
-                         VALUES (:u, :h, :c, :c2)');
+                         SELECT :u, :h, :c, :c2
+                         WHERE NOT EXISTS (SELECT 1 FROM admin_user)');
     try {
         $st->execute(array(
             ':u'  => $username,
@@ -252,12 +257,22 @@ function admin_auth_init()
             ':c'  => $now,
             ':c2' => $now,
         ));
+        if ($st->rowCount() === 0) {
+            // 并发下已有另一个请求抢先插入了账号（或用户表非空）。
+            admin_denied_409('管理员账号已存在');
+        }
     } catch (PDOException $e) {
         error_log('[wenzi-api] admin init failed: ' . $e->getMessage());
         json_error(500, '初始化失败，请重试');
     }
 
-    $userId = (int)$pdo->lastInsertId();
+    // INSERT ... SELECT 下 lastInsertId() 不可靠，按 username 回查本次插入的记录。
+    $chk = $pdo->prepare('SELECT id FROM admin_user WHERE username = :u LIMIT 1');
+    $chk->execute(array(':u' => $username));
+    $userId = (int)$chk->fetchColumn();
+    if ($userId <= 0) {
+        json_error(500, '初始化失败，请重试');
+    }
     $session = admin_issue_session($userId);
 
     json_ok(array(
@@ -330,7 +345,11 @@ function admin_auth_logout(array $user)
     json_ok(null);
 }
 
-/** POST admin/password —— 修改密码（需登录 + 校验原密码）。 */
+/**
+ * POST admin/password —— 修改密码（需登录 + 校验原密码）。
+ * 改密已要求登录态，不属于未认证爆破面，不把失败计入 admin_login_attempt；
+ * 否则用户改密输错 5 次会被登录限速表误封 15 分钟。
+ */
 function admin_auth_password(array $user)
 {
     admin_check_method(array('POST'));
@@ -349,7 +368,6 @@ function admin_auth_password(array $user)
     $hash = $st->fetchColumn();
 
     if ($hash === false || !password_verify($old, (string)$hash)) {
-        admin_login_record_fail(admin_client_ip());
         usleep(300 * 1000);
         json_error(401, '原密码错误');
     }
@@ -426,6 +444,15 @@ function admin_denied_400(string $msg)
 {
     usleep(300 * 1000);
     json_error(400, $msg);
+}
+
+/**
+ * 统一 409 资源已存在，延迟 300ms 防爆破。
+ */
+function admin_denied_409(string $msg)
+{
+    usleep(300 * 1000);
+    json_error(409, $msg);
 }
 
 /**
@@ -677,8 +704,9 @@ function admin_api_save()
             error_log('[wenzi-api] admin_api_save update failed: ' . $e->getMessage());
             json_error(500, '服务器错误');
         }
+        // UPDATE 命中 0 行只有两种可能：记录已被并发删除（404），
+        // 或提交值与原值完全相同（rowCount=0 但记录仍在）。用 COUNT 区分。
         if ($st->rowCount() === 0) {
-            // 可能 id 不存在，或提交内容与原值相同；校验记录是否仍存在。
             $chk = $pdo->prepare('SELECT COUNT(*) FROM api_config WHERE id=:id');
             $chk->execute(array(':id' => $id));
             if ((int)$chk->fetchColumn() === 0) {
@@ -710,7 +738,7 @@ function admin_api_save()
     }
 }
 
-/** POST admin/api/delete —— 删除（级联删素材） */
+/** POST admin/api/delete —— 删除配置并显式清理其素材（事务，不依赖外键 CASCADE） */
 function admin_api_delete()
 {
     admin_check_method(array('POST'));
@@ -721,10 +749,24 @@ function admin_api_delete()
     }
 
     $pdo = db_connect();
-    $st = $pdo->prepare('DELETE FROM api_config WHERE id=:id');
-    $st->execute(array(':id' => $id));
-    if ($st->rowCount() === 0) {
+
+    // 先确认记录存在，保持与原有 404 语义一致；不存在时不执行事务。
+    $chk = $pdo->prepare('SELECT COUNT(*) FROM api_config WHERE id = :id');
+    $chk->execute(array(':id' => $id));
+    if ((int)$chk->fetchColumn() === 0) {
         admin_denied_404('API 不存在');
+    }
+
+    try {
+        db_transaction($pdo, function ($pdo) use ($id) {
+            // 显式先删素材，不再依赖 PRAGMA foreign_keys + ON DELETE CASCADE。
+            // api_log.api_id 的 ON DELETE SET NULL 仍由数据库负责（日志历史保留，api_id 置 NULL）。
+            $pdo->prepare('DELETE FROM api_text WHERE api_id = :id')->execute(array(':id' => $id));
+            $pdo->prepare('DELETE FROM api_config WHERE id = :id')->execute(array(':id' => $id));
+        });
+    } catch (PDOException $e) {
+        error_log('[wenzi-api] admin_api_delete failed: ' . $e->getMessage());
+        json_error(500, '删除失败，请稍后重试');
     }
 
     json_ok(null);
@@ -962,25 +1004,11 @@ function admin_text_batch_save()
         $seenInBatch[$c] = true;
     }
 
-    // 读取该 API 下已有内容。即使前端选择“不去重”，数据库唯一约束也不允许重复；
-    // 后续 INSERT OR IGNORE 会把并发冲突准确计入 skipped。
-    $existing = array();
-    $st = $pdo->prepare('SELECT content FROM api_text WHERE api_id = :api_id');
-    $st->execute(array(':api_id' => $apiId));
-    while ($row = $st->fetch()) {
-        $existing[$row['content']] = true;
-    }
-    if ($skipDuplicate) {
-        $filtered = array();
-        foreach ($toInsert as $c) {
-            if (isset($existing[$c])) {
-                $skipped++;
-                continue;
-            }
-            $filtered[] = $c;
-        }
-        $toInsert = $filtered;
-    }
+    // 不再把该 API 的全部已有素材读进内存（旧库可能数万条，会 OOM）。
+    // skip_duplicate=true 时逐条走 NOT EXISTS 子查询，内存占用与批次大小成正比；
+    // skip_duplicate=false 时仍逐条 INSERT OR IGNORE（数据库唯一约束是最终兜底），
+    // 命中既有条目时 rowCount=0 计入 skipped。
+    $useNotExists = $skipDuplicate;
 
     if (empty($toInsert)) {
         json_ok(array('inserted' => 0, 'skipped' => $skipped, 'invalid' => $invalid));
@@ -988,14 +1016,35 @@ function admin_text_batch_save()
 
     $inserted = 0;
     try {
-        db_transaction($pdo, function ($pdo) use ($apiId, $toInsert, &$inserted, &$skipped) {
-            $st = $pdo->prepare('INSERT OR IGNORE INTO api_text (api_id, content) VALUES (:api_id, :content)');
+        db_transaction($pdo, function ($pdo) use ($apiId, $toInsert, $useNotExists, &$inserted, &$skipped) {
+            if ($useNotExists) {
+                // SQLite 不支持 INSERT ... VALUES ... WHERE；
+                // 改用 INSERT ... SELECT ... WHERE NOT EXISTS，常量 SELECT 无 FROM。
+                $st = $pdo->prepare(
+                    'INSERT INTO api_text (api_id, content)
+                     SELECT :api_id, :content
+                     WHERE NOT EXISTS (
+                         SELECT 1 FROM api_text WHERE api_id = :api_id2 AND content = :content2
+                     )'
+                );
+            } else {
+                $st = $pdo->prepare('INSERT OR IGNORE INTO api_text (api_id, content) VALUES (:api_id, :content)');
+            }
             foreach ($toInsert as $c) {
-                $st->execute(array(':api_id' => $apiId, ':content' => $c));
+                if ($useNotExists) {
+                    $st->execute(array(
+                        ':api_id'   => $apiId,
+                        ':content'  => $c,
+                        ':api_id2'  => $apiId,
+                        ':content2'  => $c,
+                    ));
+                } else {
+                    $st->execute(array(':api_id' => $apiId, ':content' => $c));
+                }
                 if ($st->rowCount() > 0) {
                     $inserted++;
                 } else {
-                    // 既有数据或并发请求刚插入：唯一约束导致忽略，计入跳过。
+                    // 既有条目或并发请求刚插入：命中 NOT EXISTS / OR IGNORE，计入跳过。
                     $skipped++;
                 }
             }
@@ -1063,7 +1112,7 @@ function admin_log_list()
     ));
 }
 
-/** POST admin/log/clear —— 清空日志（可按 before_time、api_id 过滤） */
+/** POST admin/log/clear —— 清空日志（必须传 before_time 或 api_id，禁止无 WHERE 全表删除） */
 function admin_log_clear()
 {
     admin_check_method(array('POST'));
@@ -1081,7 +1130,11 @@ function admin_log_clear()
         $params[':api_id'] = (int)$p['api_id'];
     }
 
-    $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+    if (empty($where)) {
+        admin_denied_400('必须指定 before_time 或 api_id，防止误清全部日志');
+    }
+
+    $whereSql = 'WHERE ' . implode(' AND ', $where);
 
     $pdo = db_connect();
     $st = $pdo->prepare("DELETE FROM api_log $whereSql");

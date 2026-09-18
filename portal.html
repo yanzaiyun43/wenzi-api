@@ -85,6 +85,9 @@
   </div>
 
   <div id="statsStatus" class="loading">加载中…</div>
+  <div id="retryRow" style="display:none;margin:8px 0 0;text-align:center">
+    <button class="btn" id="retryBtn" type="button">重试</button>
+  </div>
 
   <div id="apiSection" style="display:none">
     <div class="section-head">
@@ -106,6 +109,8 @@
   const API_BASE = window.APP_CONFIG.API_BASE || new URL('api/index.php', document.baseURI).href;
   const overviewEl = document.getElementById('overview');
   const statsStatusEl = document.getElementById('statsStatus');
+  const retryRow = document.getElementById('retryRow');
+  const retryBtn = document.getElementById('retryBtn');
   const apiSectionEl = document.getElementById('apiSection');
   const apiListEl = document.getElementById('apiList');
   const apiHintEl = document.getElementById('apiHint');
@@ -246,9 +251,12 @@
   function setStatus(message, isError) {
     statsStatusEl.className = isError ? 'error' : 'empty';
     statsStatusEl.textContent = message;
+    retryRow.style.display = isError ? 'block' : 'none';
   }
 
   function loadStats() {
+    setStatus('加载中…', false);
+    statsStatusEl.className = 'loading';
     fetch(API_BASE + '?route=stats', { credentials: 'omit' })
       .then(r => r.json())
       .then(res => {
@@ -258,11 +266,13 @@
           setStatus('', false);
           statsStatusEl.style.display = 'none';
         } else {
-          setStatus('加载失败', true);
+          setStatus('统计加载失败，请检查 API 地址配置或稍后重试', true);
         }
       })
-      .catch(() => setStatus('请求失败', true));
+      .catch(() => setStatus('请求失败，请检查网络或 API 地址配置', true));
   }
+
+  retryBtn.addEventListener('click', loadStats);
 
   copyAllBtn.addEventListener('click', () => {
     if (!allApis.length) return;
