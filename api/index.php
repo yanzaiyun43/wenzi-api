@@ -5,15 +5,14 @@
  * 前端只与这个文件交互：api/index.php?route=xxx
  *
  * 职责：
- *   1. 定义 APP_ENTRY 常量（api/admin.php、api/runtime.php 据此放行）
- *   2. 载入 config.php（ADMIN_TOKEN、API_ACCESS_KEY、ALLOWED_ORIGINS、DB_PATH 等）
+ *   1. 定义 APP_ENTRY 常量（handlers/ 下的处理器据此放行）
+ *   2. 载入 config.php（ALLOWED_ORIGINS、DB_PATH、ADMIN_SESSION_TTL 等）
  *   3. 载入 db.php（SQLite 连接与锁重试）
  *   4. CORS 处理 + OPTIONS 预检直接 204
  *   5. 解析 route 并分发：
- *        - route=runtime            -> api/runtime.php
- *        - route=admin/api/*        -> api/admin.php
- *        - route=admin/text/*       -> api/admin.php
- *        - route=admin/log/*        -> api/admin.php
+ *        - route=runtime        -> api/handlers/runtime.php（对外调用，无需密钥）
+ *        - route=stats          -> api/handlers/public.php（公开统计 + 可调用接口清单）
+ *        - route=admin/*        -> api/handlers/admin.php（后台，需账号密码登录）
  *   6. 未匹配 -> 404 JSON
  *
  * 路由以 query 为主，不依赖 Apache rewrite；serv00 不支持 rewrite 也能工作。
@@ -61,7 +60,7 @@ function cors_handle()
     // 仅当来源命中允许列表才回 CORS 头；否则不写，让浏览器自己拦截跨域
     if ($matchOrigin !== '') {
         header('Access-Control-Allow-Origin: ' . $matchOrigin);
-        header('Access-Control-Allow-Headers: Content-Type, X-Admin-Token, X-API-Key, Authorization');
+        header('Access-Control-Allow-Headers: Content-Type, X-Admin-Token, Authorization');
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Max-Age: 86400');
     }
@@ -91,8 +90,8 @@ function route_dispatch()
         return include_public();
     }
 
-    // 管理后台接口：admin/api/*、admin/text/*、admin/log/*
-    if (preg_match('#^admin/(api|text|log)/#', $route)) {
+    // 管理后台接口：admin/*（会话、登录、退出、改密 + api/text/log 业务接口）
+    if (strpos($route, 'admin/') === 0) {
         return include_admin();
     }
 

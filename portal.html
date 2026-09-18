@@ -10,6 +10,7 @@
   .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
   .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
   .topbar .sub { color: #909399; font-size: 12px; margin-left: 8px; }
+  .topbar a { color: #409eff; text-decoration: none; font-size: 13px; }
   .wrap { padding: 12px 16px; max-width: 1000px; margin: 0 auto; }
   .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
   .stat-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center; }
@@ -17,10 +18,28 @@
   .stat-card .label { font-size: 13px; color: #909399; }
   .empty { text-align: center; color: #909399; padding: 40px 0; }
   .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e4e7ed; text-align: center; color: #909399; font-size: 12px; }
-  .btn-admin { display: inline-block; margin-top: 8px; padding: 8px 16px; background: #409eff; color: #fff; border-radius: 6px; text-decoration: none; font-size: 13px; }
-  .btn-admin:hover { background: #66b1ff; }
   .loading { text-align: center; color: #909399; padding: 40px 0; }
   .error { text-align: center; color: #f56c6c; padding: 40px 0; }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+  .section-head h2 { font-size: 15px; margin: 0; color: #303133; }
+  .section-head .hint { color: #909399; font-size: 12px; }
+  .api-list { display: flex; flex-direction: column; gap: 10px; }
+  .api-item { background: #fff; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .api-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .api-name { font-weight: 600; font-size: 14px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; line-height: 18px; }
+  .tag-template { background: #fdf6ec; color: #e6a23c; }
+  .tag-random { background: #f0f9eb; color: #67c23a; }
+  .mono { font-family: "SF Mono",Consolas,monospace; font-size: 12px; word-break: break-all; }
+  .url-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .url-text { flex: 1 1 240px; background: #f7f8fa; border: 1px solid #ebeef5; border-radius: 6px; padding: 6px 8px; color: #606266; }
+  .btn { border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; background: #409eff; color: #fff; white-space: nowrap; }
+  .btn:hover { background: #66b1ff; }
+  .btn.plain { background: #f0f2f5; color: #606266; }
+  .btn.plain:hover { background: #e4e7ed; }
+  .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); background: rgba(48,49,51,.92); color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 99; }
+  .toast.show { opacity: 1; }
 
   @media (max-width: 480px) {
     .topbar { padding: 10px 12px; }
@@ -28,6 +47,7 @@
     .wrap { padding: 8px 12px; }
     .stat-card { padding: 12px; }
     .stat-card .num { font-size: 24px; }
+    .url-text { flex: 1 1 100%; }
   }
 </style>
 </head>
@@ -37,6 +57,7 @@
     <h1>旧识桥 api</h1>
     <span class="sub">公共统计门户</span>
   </div>
+  <div><a href="admin/">进入管理后台</a></div>
 </div>
 
 <div class="wrap">
@@ -49,11 +70,21 @@
 
   <div id="statsStatus" class="loading">加载中…</div>
 
-  <div class="footer">
-    <a href="/admin/" class="btn-admin">进入管理后台</a>
-    <div style="margin-top:8px">旧识桥 api 统计门户 · 数据实时更新</div>
+  <div id="apiSection" style="display:none">
+    <div class="section-head">
+      <h2>接口列表</h2>
+      <span class="hint" id="apiHint"></span>
+    </div>
+    <div class="api-list" id="apiList"></div>
+    <div style="margin-top:10px">
+      <button class="btn plain" id="copyAllBtn" type="button">复制全部调用地址</button>
+    </div>
   </div>
+
+  <div class="footer">旧识桥 api 统计门户 · 数据实时更新</div>
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 (function() {
@@ -62,6 +93,13 @@
     || new URL('api/index.php', document.baseURI).href;
   const overviewEl = document.getElementById('overview');
   const statsStatusEl = document.getElementById('statsStatus');
+  const apiSectionEl = document.getElementById('apiSection');
+  const apiListEl = document.getElementById('apiList');
+  const apiHintEl = document.getElementById('apiHint');
+  const copyAllBtn = document.getElementById('copyAllBtn');
+  const toastEl = document.getElementById('toast');
+
+  let allApis = [];
 
   function fmtNum(n) {
     if (n >= 10000) return (n/10000).toFixed(1) + 'w';
@@ -80,8 +118,129 @@
     items.forEach(item => {
       const div = document.createElement('div');
       div.className = 'stat-card';
-      div.innerHTML = '<div class="num">' + fmtNum(data[item.key] || 0) + '</div><div class="label">' + item.label + '</div>';
+      const num = document.createElement('div');
+      num.className = 'num';
+      num.textContent = fmtNum(data[item.key] || 0);
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = item.label;
+      div.appendChild(num);
+      div.appendChild(label);
       overviewEl.appendChild(div);
+    });
+  }
+
+  function callUrl(path) {
+    return API_BASE + '?route=runtime&path=' + encodeURIComponent(path);
+  }
+
+  function toast(message) {
+    toastEl.textContent = message;
+    toastEl.classList.add('show');
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () {
+        return copyTextFallback(text);
+      });
+    }
+    return copyTextFallback(text);
+  }
+
+  function copyTextFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let copied = false;
+    try {
+      copied = document.execCommand('copy') === true;
+    } finally {
+      document.body.removeChild(ta);
+    }
+    return copied ? Promise.resolve() : Promise.reject(new Error('copy failed'));
+  }
+
+  function renderApis(apis) {
+    allApis = apis || [];
+    apiListEl.innerHTML = '';
+
+    if (!allApis.length) {
+      apiSectionEl.style.display = 'block';
+      apiHintEl.textContent = '暂无启用中的接口';
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = '后台还没有启用任何接口';
+      apiListEl.appendChild(empty);
+      copyAllBtn.style.display = 'none';
+      return;
+    }
+
+    apiSectionEl.style.display = 'block';
+    apiHintEl.textContent = '共 ' + allApis.length + ' 个接口 · 无需密钥，复制地址即可调用';
+
+    allApis.forEach(api => {
+      const url = callUrl(api.path);
+
+      const item = document.createElement('div');
+      item.className = 'api-item';
+
+      const head = document.createElement('div');
+      head.className = 'api-head';
+
+      const name = document.createElement('span');
+      name.className = 'api-name';
+      name.textContent = api.name || api.path;
+
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + (api.type === 'template' ? 'tag-template' : 'tag-random');
+      tag.textContent = api.type === 'template' ? '模板替换' : '随机素材';
+
+      const pathEl = document.createElement('span');
+      pathEl.className = 'mono';
+      pathEl.textContent = api.path;
+
+      head.appendChild(name);
+      head.appendChild(tag);
+      head.appendChild(pathEl);
+
+      const row = document.createElement('div');
+      row.className = 'url-row';
+
+      const urlText = document.createElement('div');
+      urlText.className = 'mono url-text';
+      urlText.textContent = url;
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn';
+      copyBtn.type = 'button';
+      copyBtn.textContent = '复制';
+      copyBtn.addEventListener('click', () => {
+        copyText(url).then(() => toast('已复制：' + api.path))
+          .catch(() => toast('复制失败，请手动选择地址'));
+      });
+
+      const openLink = document.createElement('a');
+      openLink.className = 'btn plain';
+      openLink.href = url;
+      openLink.target = '_blank';
+      openLink.rel = 'noopener';
+      openLink.textContent = '打开';
+      openLink.style.textDecoration = 'none';
+
+      row.appendChild(urlText);
+      row.appendChild(copyBtn);
+      row.appendChild(openLink);
+
+      item.appendChild(head);
+      item.appendChild(row);
+      apiListEl.appendChild(item);
     });
   }
 
@@ -96,15 +255,24 @@
       .then(res => {
         if (res && res.code === 0 && res.data) {
           renderOverview(res.data.overview || {});
-          setStatus('仅展示汇总统计，不公开接口明细。', false);
+          renderApis(res.data.apis || []);
+          setStatus('', false);
+          statsStatusEl.style.display = 'none';
         } else {
-          setStatus('加载失败：' + (res?.msg || '未知错误'), true);
+          setStatus('加载失败：' + (res && res.msg ? res.msg : '未知错误'), true);
         }
       })
       .catch(e => {
         setStatus('请求异常：' + e.message, true);
       });
   }
+
+  copyAllBtn.addEventListener('click', () => {
+    if (!allApis.length) return;
+    const text = allApis.map(api => (api.name || api.path) + '\t' + callUrl(api.path)).join('\n');
+    copyText(text).then(() => toast('已复制全部 ' + allApis.length + ' 个接口地址'))
+      .catch(() => toast('复制失败，请手动选择地址'));
+  });
 
   loadStats();
 })();

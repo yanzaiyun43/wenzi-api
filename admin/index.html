@@ -55,8 +55,9 @@
       <span class="sub">API 配置 / 文字素材 / 访问日志</span>
     </div>
     <div>
-      <el-button :icon="'Setting'" size="small" @click="openTokenDialog">设置 TOKEN</el-button>
-      <el-button :icon="'Key'" size="small" @click="openApiKeyDialog">设置密钥</el-button>
+      <span class="sub" v-if="username">已登录：{{ username }}</span>
+      <el-button :icon="'Lock'" size="small" @click="onChangePassword">修改密码</el-button>
+      <el-button :icon="'SwitchButton'" size="small" @click="onLogout">退出登录</el-button>
     </div>
   </div>
 
@@ -153,6 +154,7 @@ const app = createApp({
     const list = ref([]);
     const total = ref(0);
     const loading = ref(false);
+    const username = ref('');
     const query = reactive({ keyword: '', enabled: null, page: 1, page_size: 20 });
 
     // 移动端检测（用于卡片式布局切换）
@@ -232,25 +234,55 @@ const app = createApp({
       }
     }
 
-    async function openTokenDialog() {
-      if (await JSQ.promptAdminToken()) {
-        ElMessage.success('TOKEN 已保存，可点「刷新」重新加载');
+    async function onChangePassword() {
+      let oldPassword = '';
+      try {
+        const r1 = await ElMessageBox.prompt('请输入当前密码', '修改密码', {
+          confirmButtonText: '下一步', cancelButtonText: '取消', inputType: 'password',
+        });
+        oldPassword = r1.value;
+      } catch (e) {
+        return;
+      }
+      let newPassword = '';
+      try {
+        const r2 = await ElMessageBox.prompt('请输入新密码（8-128 位）', '修改密码', {
+          confirmButtonText: '保存', cancelButtonText: '取消', inputType: 'password',
+          inputPattern: /^[\s\S]{8,128}$/,
+          inputErrorMessage: '新密码长度需 8-128 位',
+        });
+        newPassword = r2.value;
+      } catch (e) {
+        return;
+      }
+      try {
+        await JSQ.changePassword(oldPassword, newPassword);
+        ElMessage.success('密码已修改，其它设备需重新登录');
+      } catch (e) {
+        // 拦截器已提示
       }
     }
 
-    async function openApiKeyDialog() {
-      await JSQ.promptApiKey();
+    async function onLogout() {
+      try {
+        await ElMessageBox.confirm('确认退出登录？', '退出确认', {
+          type: 'warning', confirmButtonText: '退出', cancelButtonText: '取消',
+        });
+      } catch (e) {
+        return;
+      }
+      JSQ.logout();
     }
 
-    // 首次进入若无 token 提示
-    onMounted(() => {
-      if (!JSQ.getToken()) {
-        ElMessage.warning('请先设置管理员 TOKEN');
-      }
+    // 进入页面先确认已登录，再加载数据
+    onMounted(async () => {
+      const ok = await JSQ.ensureLogin();
+      if (!ok) return;
+      username.value = JSQ.getUsername();
       loadList();
     });
 
-    return { JSQ, list, total, loading, query, loadList, onSearch, onKeywordInput, onPageChange, goAdd, goEdit, goText, goLog, toggleRow, delRow, copyUrl, openTokenDialog, openApiKeyDialog, isMobile };
+    return { JSQ, list, total, loading, query, username, loadList, onSearch, onKeywordInput, onPageChange, goAdd, goEdit, goText, goLog, toggleRow, delRow, copyUrl, onChangePassword, onLogout, isMobile };
   },
 }).use(ElementPlus);
 

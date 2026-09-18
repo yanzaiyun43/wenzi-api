@@ -3,17 +3,17 @@
  * 旧识桥 api · api/handlers/runtime.php（对外文字 API 运行接口）
  * ----------------------------------------------------------------
  * 仅被统一入口 index.php（APP_ENTRY）include，禁止浏览器直接访问。
- * 路由：route=runtime&path=xxx&key=xxx（key 也可用请求头 X-API-Key 传递）
+ * 路由：route=runtime&path=xxx（无需密钥；接口对所有人开放调用）
  *
  * 流程：
- *   1. 校验 key（hash_equals）；错误返回 403 JSON + 延迟 200ms
+ *   1. 校验 path 格式（1-64 位 [a-zA-Z0-9_-]）
  *   2. 按 path 查询 api_config；不存在 -> 404 JSON
  *   3. enabled=0 -> 403 JSON
  *   4. 按 type 处理：
  *        - random_text：api_text 随机取一条（ORDER BY RANDOM() LIMIT 1），无素材 -> 404 JSON
  *        - template：替换 {{参数名}}（变量名 [a-zA-Z0-9_]{1,32}，未传参替换为空）
  *   5. 成功返回纯文本（text/plain），失败返回 JSON
- *   6. 写调用日志（key 脱敏，截断 2000），失败忽略
+ *   6. 写调用日志（鉴权类参数不进日志，截断 2000），失败忽略
  *
  * 禁止 eval / 动态 include / 执行任何用户输入代码。
  * 输出最大长度 1MB。
@@ -47,25 +47,7 @@ if (!function_exists('json_error')) {
  */
 function runtime_run()
 {
-    // ---------- 1. 校验 key ----------
-    $key = '';
-    // X-API-Key 头优先
-    if (isset($_SERVER['HTTP_X_API_KEY']) && $_SERVER['HTTP_X_API_KEY'] !== '') {
-        $key = (string)$_SERVER['HTTP_X_API_KEY'];
-    } elseif (isset($_GET['key']) && $_GET['key'] !== '') {
-        $key = (string)$_GET['key'];
-    }
-
-    $expected = defined('API_ACCESS_KEY') ? API_ACCESS_KEY : '';
-    $keyOk = ($expected !== '' && $key !== '' && hash_equals($expected, $key));
-
-    if (!$keyOk) {
-        // key 错误/缺失：延迟 200ms 防爆破，返回 403 JSON
-        usleep(200 * 1000);
-        json_error(403, 'key 错误');
-    }
-
-    // ---------- 2. 读取 path ----------
+    // ---------- 1. 读取并校验 path ----------
     $path = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
     if ($path === '') {
         json_error(400, '缺少 path 参数');
@@ -75,7 +57,7 @@ function runtime_run()
         json_error(400, 'path 无效');
     }
 
-    // ---------- 3/4. 查询 API ----------
+    // ---------- 2/3. 查询 API ----------
     $pdo = db_connect();
 
     $st = $pdo->prepare('SELECT id, path, name, type, content, enabled FROM api_config WHERE path = :path');
@@ -93,7 +75,7 @@ function runtime_run()
     $apiId = (int)$api['id'];
     $type = (string)$api['type'];
 
-    // ---------- 5. 按类型处理，得到输出文本 ----------
+    // ---------- 4. 按类型处理，得到输出文本 ----------
     $output = '';
     if ($type === 'template') {
         $content = (string)$api['content'];
@@ -105,10 +87,10 @@ function runtime_run()
         json_error(500, '未知 API 类型');
     }
 
-    // ---------- 6. 输出长度限制 1MB（按 UTF-8 边界截断） ----------
+    // ---------- 5. 输出长度限制 1MB（按 UTF-8 边界截断） ----------
     $output = utf8_truncate_bytes($output, 1048576);
 
-    // ---------- 7. 成功返回纯文本 ----------
+    // ---------- 6. 成功返回纯文本 ----------
     header('Content-Type: text/plain; charset=utf-8');
     echo $output;
 
@@ -117,7 +99,7 @@ function runtime_run()
         fastcgi_finish_request();
     }
 
-    // ---------- 8. 写调用日志（失败忽略，key 已排除）----------
+    // ---------- 7. 写调用日志（失败忽略，鉴权类参数已排除）----------
     runtime_write_log($pdo, $apiId);
 
     exit;

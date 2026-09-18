@@ -4,8 +4,9 @@
  * ----------------------------------------------------------------
  * 仅被统一入口 index.php（APP_ENTRY）include，禁止浏览器直接访问。
  * 提供公开统计接口，无需鉴权：
- *   - stats：仅返回总览统计（API 数、素材总数、调用总数、今日调用）
- * 统计不公开 API 路径、名称、状态、素材数或调用数等业务明细；
+ *   - stats：返回总览统计（API 数、素材总数、调用总数、今日调用）
+ *            以及可直接调用的接口清单（path / 名称 / 类型，仅启用中的接口）
+ * 接口清单用于统计门户展示，方便别人复制地址直接调用；接口现在无需密钥。
  * 数据库不存在时直接返回受控错误，绝不由公开请求创建数据库或表。
  * ----------------------------------------------------------------
  */
@@ -47,10 +48,17 @@ if (!function_exists('json_ok')) {
     }
 }
 
+/** 对外接口清单最多返回多少条，避免超大站点统计接口过重。 */
+if (!defined('PUBLIC_API_LIST_LIMIT')) {
+    define('PUBLIC_API_LIST_LIMIT', 500);
+}
+
 /**
- * GET stats —— 公开总览统计数据（无需鉴权）。
- * 仅返回 overview: { api_total, text_total, call_total, call_today }。
+ * GET stats —— 公开总览统计 + 可调用接口清单（无需鉴权）。
+ * 返回 overview: { api_total, text_total, call_total, call_today }
+ *      apis:     [ { path, name, type } ]（仅 enabled=1，按创建顺序）
  * 未完成安装或数据库文件不存在时返回 503，不调用 db_connect()，避免公开请求创建数据库或表。
+ * 只暴露 path / 名称 / 类型，不暴露素材内容、调用次数等细节。
  */
 function public_stats()
 {
@@ -79,6 +87,21 @@ function public_stats()
         $textTotal = (int)$overview['text_total'];
         $callTotal = (int)$overview['call_total'];
         $callToday = (int)$overview['call_today'];
+
+        // 可调用接口清单：仅启用中的接口，按创建顺序排列。
+        $limit = (int)PUBLIC_API_LIST_LIMIT;
+        $ls = $pdo->prepare('SELECT path, name, type FROM api_config WHERE enabled = 1 ORDER BY id ASC LIMIT :lim');
+        $ls->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $ls->execute();
+
+        $apis = array();
+        while ($row = $ls->fetch()) {
+            $apis[] = array(
+                'path' => (string)$row['path'],
+                'name' => (string)$row['name'],
+                'type' => (string)$row['type'],
+            );
+        }
     } catch (PDOException $e) {
         error_log('[wenzi-api] public_stats failed: ' . $e->getMessage());
         json_error(503, '统计暂不可用');
@@ -91,6 +114,8 @@ function public_stats()
             'call_total'  => $callTotal,
             'call_today'  => $callToday,
         ),
+        'apis'        => $apis,
+        'apis_limit'  => $limit,
     ));
 }
 

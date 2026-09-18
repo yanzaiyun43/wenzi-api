@@ -109,7 +109,9 @@ function db_connect(): PDO
 }
 
 /**
- * 建表与索引（幂等，IF NOT EXISTS）。三张表结构以需求文档为准。
+ * 建表与索引（幂等，IF NOT EXISTS）。六张表：
+ * 业务三张（api_config / api_text / api_log）+ 后台三张
+ * （admin_user / admin_session / admin_login_attempt）。
  */
 function db_init_tables(PDO $pdo)
 {
@@ -142,10 +144,20 @@ function db_init_tables(PDO $pdo)
         FOREIGN KEY(api_id) REFERENCES api_config(id) ON DELETE SET NULL
     )");
 
-    // 索引：api_text.api_id；api_log.api_id、call_time
+    // 4. admin_user 管理员账号表（账号 + 密码哈希，取代固定 TOKEN）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS admin_user (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        username TEXT NOT NULL UNIQUE,\n        password_hash TEXT NOT NULL,\n        create_time INTEGER NOT NULL,\n        update_time INTEGER NOT NULL\n    )");
+
+    // 5. admin_session 登录会话表（只存 token 的 sha256 摘要，不存明文）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS admin_session (\n        id INTEGER PRIMARY KEY AUTOINCREMENT,\n        token_hash TEXT NOT NULL UNIQUE,\n        user_id INTEGER NOT NULL,\n        create_time INTEGER NOT NULL,\n        expire_time INTEGER NOT NULL,\n        FOREIGN KEY(user_id) REFERENCES admin_user(id) ON DELETE CASCADE\n    )");
+
+    // 6. admin_login_attempt 登录失败计数（按 IP 限速，防暴力猜密码）
+    $pdo->exec("CREATE TABLE IF NOT EXISTS admin_login_attempt (\n        ip TEXT PRIMARY KEY,\n        fails INTEGER NOT NULL DEFAULT 0,\n        last_time INTEGER NOT NULL\n    )");
+
+    // 索引：api_text.api_id；api_log.api_id、call_time；admin_session.expire_time
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_text_api_id   ON api_text(api_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_log_api_id    ON api_log(api_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_log_call_time ON api_log(call_time)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_admin_session_expire ON admin_session(expire_time)');
 
     // “跳过重复”需要数据库最终兜底。旧库首次迁移时保留每组最早记录后创建唯一索引。
     $indexName = 'idx_api_text_api_content_unique';

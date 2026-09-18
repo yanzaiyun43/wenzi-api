@@ -6,12 +6,16 @@
  * 流程：
  *   1. install.lock 已存在 -> 拒绝安装
  *   2. 环境检查（PHP>=7.4、PDO、pdo_sqlite、目录可写等）
- *   3. 显示表单：管理员 TOKEN / API 密钥（可自动生成）/ 允许来源 / 示例 API 开关
- *   4. 一键安装：生成 config.php（var_export，禁拼接）、创建 api.db、三张表、
- *      install.lock；config.php 已存在且无 lock 时二次确认覆盖
+ *   3. 显示表单：管理员账号 / 密码（可自动生成）/ 允许来源 / 示例 API 开关
+ *   4. 一键安装：生成 config.php（var_export，禁拼接）、创建 api.db、建表、
+ *      写入管理员账号（password_hash）、install.lock；
+ *      config.php 已存在且无 lock 时二次确认覆盖
  *   5. 安装成功后提示删除 install.php 或保留 install.lock
  *
- * 可选 CLI：php api/install.php --admin-token=xxx --api-key=xxx --origins=https://example.com
+ * 对外接口不再需要密钥（key）；后台改为「账号 + 密码」登录。
+ * 重装会重置管理员账号与密码（原有数据保留，示例素材幂等写入）。
+ *
+ * 可选 CLI：php api/install.php --admin-user=admin --admin-pass=xxxx --origins=https://example.com
  * 禁止 eval/exec/system/shell_exec 等危险函数；禁止执行用户输入代码。
  * ----------------------------------------------------------------
  */
@@ -37,11 +41,11 @@ if (file_exists($lockFile)) {
     exit;
 }
 
-// —— 自动生成密钥工具 ——
-function install_rand_key($len = 32)
+// —— 自动生成密码工具 ——
+function install_rand_password($len = 20)
 {
     // 使用 random_bytes 保证强度（PHP>=7.0 均可用）
-    $alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-';
+    $alphabet = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     $bytes = random_bytes($len);
     $out = '';
     for ($i = 0; $i < $len; $i++) {
@@ -51,13 +55,17 @@ function install_rand_key($len = 32)
 }
 
 // —— 校验输入 ——
-function install_validate_token($v)
+function install_validate_username($v)
 {
-    return is_string($v) && preg_match('#^[a-zA-Z0-9_\-]{16,128}$#', $v);
+    return is_string($v) && preg_match('#^[a-zA-Z0-9_.\-]{3,32}$#', $v);
 }
-function install_validate_key($v)
+function install_validate_password($v)
 {
-    return is_string($v) && preg_match('#^[a-zA-Z0-9_\-]{16,128}$#', $v);
+    if (!is_string($v)) {
+        return false;
+    }
+    $len = strlen($v);
+    return $len >= 8 && $len <= 128;
 }
 function install_validate_origin($v)
 {
@@ -107,6 +115,9 @@ function install_env_checks()
     if (!extension_loaded('pdo_sqlite')) {
         $problems[] = '缺少 pdo_sqlite 扩展';
     }
+    if (!function_exists('password_hash')) {
+        $problems[] = '缺少 password_hash（PHP 需带标准密码哈希支持）';
+    }
     if (!is_dir(__DIR__) || !is_writable(__DIR__)) {
         $problems[] = 'api/ 目录不可写';
     }
@@ -123,17 +134,17 @@ function install_env_checks()
 }
 
 // —— 生成 config.php 内容（var_export，禁止拼接用户输入）——
-function install_build_config($adminToken, $apiKey, array $origins)
+// 管理员账号存在数据库里（密码只存哈希），配置文件不再包含任何密钥。
+function install_build_config(array $origins)
 {
     $originExpr = var_export($origins, true);
-    $adminExpr  = var_export($adminToken, true);
-    $keyExpr    = var_export($apiKey, true);
 
     return <<<PHP
 <?php
 /**
  * 旧识桥 api · api/config.php（由 install.php 生成）
- * 可手动编辑以下常量更换密钥/来源；保存即生效，无需重启（短进程模式）。
+ * 可手动编辑以下配置；保存即生效，无需重启（短进程模式）。
+ * 管理员账号与密码不在本文件：请在后台登录页使用账号 + 密码登录。
  */
 
 if (!defined('APP_ENTRY') && !defined('APP_INSTALL')) {
@@ -141,10 +152,6 @@ if (!defined('APP_ENTRY') && !defined('APP_INSTALL')) {
     header('Content-Type: text/plain; charset=utf-8');
     exit('Forbidden');
 }
-
-define('ADMIN_TOKEN', {$adminExpr});
-
-define('API_ACCESS_KEY', {$keyExpr});
 
 \$ALLOWED_ORIGINS = {$originExpr};
 
@@ -154,11 +161,14 @@ define('TRUST_X_FORWARDED_FOR', false);
 
 // 调用日志保留天数；设为 0 可关闭自动清理。
 define('LOG_RETENTION_DAYS', 90);
+
+// 后台登录会话有效期（秒），默认 7 天。
+define('ADMIN_SESSION_TTL', 604800);
 PHP;
 }
 
-// —— 执行安装（生成 config / 建库 / 建表 / 写锁）——
-function install_run($adminToken, $apiKey, array $origins, $withSample)
+// —— 执行安装（生成 config / 建库建表 / 写管理员账号 / 写锁）——
+function install_run($username, $password, array $origins, $withSample)
 {
     $cfgFile  = __DIR__ . '/config.php';
     $dbFile   = __DIR__ . '/api.db';
@@ -169,7 +179,8 @@ function install_run($adminToken, $apiKey, array $origins, $withSample)
     $configInstalled = false;
     $lockInstalled = false;
     $dbExisted = is_file($dbFile);
-    $sampleTransaction = false;
+    $inTransaction = false;
+    $pdo = null;
 
     if ($cfgTmp === false || $lockTmp === false) {
         if ($cfgTmp !== false) @unlink($cfgTmp);
@@ -179,7 +190,7 @@ function install_run($adminToken, $apiKey, array $origins, $withSample)
 
     try {
         // 先写临时配置和临时锁，安装成功前不触碰正式配置/锁文件。
-        $code = install_build_config($adminToken, $apiKey, $origins);
+        $code = install_build_config($origins);
         if (file_put_contents($cfgTmp, $code, LOCK_EX) === false) {
             throw new RuntimeException('config.php 写入失败');
         }
@@ -189,13 +200,15 @@ function install_run($adminToken, $apiKey, array $origins, $withSample)
         }
         @chmod($lockTmp, 0600);
 
-        // 先完成数据库初始化和示例数据事务；失败时正式配置仍保持原样。
+        // 数据库初始化 + 管理员账号 + 示例数据，全部放在同一事务里；
+        // 任一步失败（含后面的文件安装失败）都回滚，不留半套状态。
         require_once __DIR__ . '/db.php';
         $pdo = db_connect();
+        $pdo->beginTransaction();
+        $inTransaction = true;
+
+        install_write_admin($pdo, $username, $password);
         if ($withSample) {
-            // 将示例数据留在事务中，配置/锁文件安装失败时一起回滚。
-            $pdo->beginTransaction();
-            $sampleTransaction = true;
             install_sample_data($pdo);
         }
 
@@ -216,17 +229,16 @@ function install_run($adminToken, $apiKey, array $origins, $withSample)
         }
         $lockInstalled = true;
 
-        if ($sampleTransaction && $pdo->inTransaction()) {
-            $pdo->commit();
-            $sampleTransaction = false;
-        }
+        $pdo->commit();
+        $inTransaction = false;
+
         if ($cfgBackup !== null) {
             @unlink($cfgBackup);
             $cfgBackup = null;
         }
         return array(true, 'ok');
     } catch (Throwable $e) {
-        if (isset($pdo) && $sampleTransaction && $pdo->inTransaction()) {
+        if ($pdo instanceof PDO && $inTransaction && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
         error_log('[wenzi-api] install failed: ' . $e->getMessage());
@@ -251,6 +263,24 @@ function install_run($adminToken, $apiKey, array $origins, $withSample)
         if (is_file($lockTmp)) @unlink($lockTmp);
         if ($cfgBackup !== null && is_file($cfgBackup)) @unlink($cfgBackup);
     }
+}
+
+/**
+ * 写入/重置管理员账号（密码只存哈希）。重装时清空旧账号与会话。
+ */
+function install_write_admin(PDO $pdo, $username, $password)
+{
+    $now = time();
+    // 外键 ON DELETE CASCADE 会一并清掉旧会话
+    $pdo->exec('DELETE FROM admin_user');
+    $st = $pdo->prepare('INSERT INTO admin_user (username, password_hash, create_time, update_time)
+                         VALUES (:u, :h, :c, :c2)');
+    $st->execute(array(
+        ':u'  => $username,
+        ':h'  => password_hash($password, PASSWORD_DEFAULT),
+        ':c'  => $now,
+        ':c2' => $now,
+    ));
 }
 
 function install_sample_data($pdo)
@@ -294,15 +324,15 @@ if ($IS_CLI) {
     }
 
     $err = null;
-    $adminToken = isset($args['admin-token']) ? (string)$args['admin-token'] : '';
-    $apiKey     = isset($args['api-key']) ? (string)$args['api-key'] : '';
+    $adminUser  = isset($args['admin-user']) ? trim((string)$args['admin-user']) : '';
+    $adminPass  = isset($args['admin-pass']) ? (string)$args['admin-pass'] : '';
     $originsRaw = isset($args['origins']) ? (string)$args['origins'] : '';
     $sampleRaw  = isset($args['sample']) ? (string)$args['sample'] : '1';
 
-    if (!install_validate_token($adminToken)) {
-        $err = 'admin-token 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
-    } elseif (!install_validate_key($apiKey)) {
-        $err = 'api-key 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+    if (!install_validate_username($adminUser)) {
+        $err = 'admin-user 无效（需 [a-zA-Z0-9_.-]{3,32}）';
+    } elseif (!install_validate_password($adminPass)) {
+        $err = 'admin-pass 无效（需 8-128 位）';
     } else {
         $origins = install_parse_origins($originsRaw);
         if (empty($origins)) {
@@ -324,16 +354,17 @@ if ($IS_CLI) {
     // withSample：默认 true，仅当 sample=0 或 false 时关闭
     $withSample = !in_array($sampleRaw, array('0', 'false'), true);
 
-    list($ok, $msg) = install_run($adminToken, $apiKey, $origins, $withSample);
+    list($ok, $msg) = install_run($adminUser, $adminPass, $origins, $withSample);
     if (!$ok) {
         fwrite(STDERR, "安装失败：$msg\n");
         exit(1);
     }
     fwrite(STDOUT, "安装成功\n");
-    fwrite(STDOUT, "管理员 TOKEN：$adminToken\n");
-    fwrite(STDOUT, "API 密钥：$apiKey\n");
-    fwrite(STDOUT, "管理接口：https://你的域名/api/index.php?route=admin/api/list\n");
-    fwrite(STDOUT, "调用示例：https://你的域名/api/index.php?route=runtime&path=hello&key=$apiKey&name=张三\n");
+    fwrite(STDOUT, "管理员账号：$adminUser\n");
+    fwrite(STDOUT, "管理员密码：$adminPass\n");
+    fwrite(STDOUT, "管理后台：https://你的域名/admin/\n");
+    fwrite(STDOUT, "统计门户：https://你的域名/\n");
+    fwrite(STDOUT, "调用示例：https://你的域名/api/index.php?route=runtime&path=hello&name=张三\n");
     fwrite(STDOUT, "请删除 install.php 或保留 install.lock\n");
     exit(0);
 }
@@ -348,18 +379,19 @@ $resultOk = false;
 $resultMsg = '';
 $showConfirm = false;   // config.php 已存在且无 lock 时二次确认
 $formData = array(
-    'admin_token' => '',
-    'api_key'     => '',
-    'origins'     => 'http://localhost',
-    'sample'      => '1',
+    'admin_user' => '',
+    'admin_pass' => '',
+    'origins'    => 'http://localhost',
+    'sample'     => '1',
 );
 
 if ($submitted) {
-    // 读取输入
-    $formData['admin_token'] = isset($_POST['admin_token']) ? trim((string)$_POST['admin_token']) : '';
-    $formData['api_key']     = isset($_POST['api_key']) ? trim((string)$_POST['api_key']) : '';
-    $formData['origins']     = isset($_POST['origins']) ? trim((string)$_POST['origins']) : '';
-    $formData['sample']      = isset($_POST['sample']) ? (string)$_POST['sample'] : '0';
+    // 读取输入（密码不 trim，避免用户特意使用的空白被吃掉）
+    $formData['admin_user'] = isset($_POST['admin_user']) ? trim((string)$_POST['admin_user']) : '';
+    $formData['admin_pass'] = isset($_POST['admin_pass']) ? (string)$_POST['admin_pass'] : '';
+    $formData['origins']    = isset($_POST['origins']) ? trim((string)$_POST['origins']) : '';
+    $formData['sample']     = isset($_POST['sample']) ? (string)$_POST['sample'] : '0';
+    $passConfirm            = isset($_POST['admin_pass2']) ? (string)$_POST['admin_pass2'] : '';
 
     // 二次确认覆盖：config.php 已存在且无 lock 时，需确认参数
     // 取消按钮也会提交 confirm=1，因此必须优先判断 go=cancel。
@@ -377,10 +409,12 @@ if ($submitted) {
     } else {
         // 校验
         $err = null;
-        if (!install_validate_token($formData['admin_token'])) {
-            $err = '管理员 TOKEN 无效（需 [a-zA-Z0-9_\\-]{16,128}）';
-        } elseif (!install_validate_key($formData['api_key'])) {
-            $err = 'API 密钥无效（需 [a-zA-Z0-9_\\-]{16,128}）';
+        if (!install_validate_username($formData['admin_user'])) {
+            $err = '管理员账号无效（需 3-32 位字母数字下划线点中划线）';
+        } elseif (!install_validate_password($formData['admin_pass'])) {
+            $err = '管理员密码无效（需 8-128 位）';
+        } elseif ($passConfirm !== $formData['admin_pass']) {
+            $err = '两次输入的密码不一致';
         } else {
             $origins = install_parse_origins($formData['origins']);
             if (empty($origins)) {
@@ -399,7 +433,7 @@ if ($submitted) {
             $resultMsg = $err;
         } else {
             $withSample = ($formData['sample'] === '1');
-            list($ok, $msg) = install_run($formData['admin_token'], $formData['api_key'], $origins, $withSample);
+            list($ok, $msg) = install_run($formData['admin_user'], $formData['admin_pass'], $origins, $withSample);
             $resultOk = $ok;
             $resultMsg = $msg;
         }
@@ -412,8 +446,8 @@ $envOk = empty($envProblems);
 
 // 未提交时给默认自动生成值（仅当表单空）
 if (!$submitted) {
-    $formData['admin_token'] = install_rand_key(32);
-    $formData['api_key']     = install_rand_key(32);
+    $formData['admin_user'] = 'admin';
+    $formData['admin_pass'] = install_rand_password(20);
 }
 ?>
 <!DOCTYPE html>
@@ -435,14 +469,14 @@ if (!$submitted) {
   .row input{flex:1}
   button{background:#4c6ef5;color:#fff;border:none;padding:11px 18px;border-radius:6px;font-size:15px;cursor:pointer;margin-top:18px}
   button:hover{background:#3b5bdb}
-  .btn-mini{background:#e7ecff;color:#3b5bdb;border:1px solid #c7d2ff;border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px}
+  .btn-mini{background:#e7ecff;color:#3b5bdb;border:1px solid #c7d2ff;border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px;white-space:nowrap}
   .ok{background:#d3f9d8;color:#1e7d32;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px;white-space:pre-line}
   .err{background:#ffe3e3;color:#c92a2a;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
   .warn{background:#fff3bf;color:#b8860b;padding:12px 14px;border-radius:6px;font-size:14px;margin-top:16px}
   ul.check{list-style:none;padding:0;margin:12px 0}
   ul.check li{padding:4px 0;font-size:14px}
   .pass{color:#2f9e44}.fail{color:#c92a2a}
-  code{background:#f1f3f5;padding:1px 6px;border-radius:4px;font-size:13px}
+  code{background:#f1f3f5;padding:1px 6px;border-radius:4px;font-size:13px;word-break:break-all}
 </style>
 </head>
 <body>
@@ -463,14 +497,16 @@ if (!$submitted) {
     <?php if ($resultOk): ?>
       <div class="ok">
         <b>✔ 安装成功！</b>
-        管理员 TOKEN：<code><?php echo htmlspecialchars($formData['admin_token']); ?></code>
-        API 密钥：<code><?php echo htmlspecialchars($formData['api_key']); ?></code>
+        管理员账号：<code><?php echo htmlspecialchars($formData['admin_user']); ?></code>
+        管理员密码：<code><?php echo htmlspecialchars($formData['admin_pass']); ?></code>
 
-        管理接口：<code>api/index.php?route=admin/api/list</code>
-        调用示例：<code>api/index.php?route=runtime&amp;path=hello&amp;key=<?php echo htmlspecialchars($formData['api_key']); ?>&amp;name=张三</code>
+        管理后台：<code>admin/</code>（用上面的账号 + 密码登录）
+        统计门户：<code>/</code>（展示调用统计和全部接口清单）
+        调用示例：<code>api/index.php?route=runtime&amp;path=hello&amp;name=张三</code>
 
+        对外接口无需密钥，任何知道地址的人都可以调用。
         <b>请立即删除 install.php，或至少保留 install.lock。</b>
-        修改 api/config.php 可更换密钥。
+        重装会重置管理员账号密码，请在后台「修改密码」处改成自己记得住的密码。
       </div>
     <?php else: ?>
       <?php if ($resultMsg !== ''): ?>
@@ -482,17 +518,17 @@ if (!$submitted) {
           <input type="hidden" name="confirm" value="1">
         <?php endif; ?>
 
-        <label>管理员 TOKEN <span class="hint">[a-zA-Z0-9_-]{16,128}，管理接口鉴权用</span></label>
+        <label>管理员账号 <span class="hint">3-32 位字母数字下划线点中划线</span></label>
+        <input type="text" name="admin_user" id="admin_user" value="<?php echo htmlspecialchars($formData['admin_user']); ?>" autocomplete="username">
+
+        <label>管理员密码 <span class="hint">8-128 位，登录后台用</span></label>
         <div class="row">
-          <input type="text" name="admin_token" id="admin_token" value="<?php echo htmlspecialchars($formData['admin_token']); ?>">
-          <button type="button" class="btn-mini" onclick="document.getElementById('admin_token').value=randKey()">自动生成</button>
+          <input type="text" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
+          <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
         </div>
 
-        <label>API 访问密钥 <span class="hint">[a-zA-Z0-9_-]{16,128}，对外调用鉴权用</span></label>
-        <div class="row">
-          <input type="text" name="api_key" id="api_key" value="<?php echo htmlspecialchars($formData['api_key']); ?>">
-          <button type="button" class="btn-mini" onclick="document.getElementById('api_key').value=randKey()">自动生成</button>
-        </div>
+        <label>确认密码</label>
+        <input type="text" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
 
         <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
         <textarea name="origins" id="origins"><?php echo htmlspecialchars($formData['origins']); ?></textarea>
@@ -515,17 +551,20 @@ if (!$submitted) {
 </div>
 
 <script>
-function randKey(){
-  var a='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-',s='';
-  var c=crypto.getRandomValues(new Uint8Array(32));
-  for(var i=0;i<32;i++){s+=a[c[i]%a.length];}
-  return s;
+function randPass(){
+  var a='abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',s='';
+  var c=crypto.getRandomValues(new Uint8Array(20));
+  for(var i=0;i<20;i++){s+=a[c[i]%a.length];}
+  document.getElementById('admin_pass').value=s;
+  document.getElementById('admin_pass2').value=s;
 }
 function validateForm(){
-  var t=document.getElementById('admin_token').value;
-  var k=document.getElementById('api_key').value;
-  if(!/^[a-zA-Z0-9_-]{16,128}$/.test(t)){alert('管理员 TOKEN 需 16-128 位字母数字下划线中划线');return false;}
-  if(!/^[a-zA-Z0-9_-]{16,128}$/.test(k)){alert('API 密钥需 16-128 位字母数字下划线中划线');return false;}
+  var u=document.getElementById('admin_user').value;
+  var p=document.getElementById('admin_pass').value;
+  var p2=document.getElementById('admin_pass2').value;
+  if(!/^[a-zA-Z0-9_.-]{3,32}$/.test(u)){alert('管理员账号需 3-32 位字母数字下划线点中划线');return false;}
+  if(p.length<8||p.length>128){alert('管理员密码需 8-128 位');return false;}
+  if(p!==p2){alert('两次输入的密码不一致');return false;}
   return true;
 }
 </script>

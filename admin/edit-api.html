@@ -41,7 +41,7 @@
       <span class="sub">旧识桥 api 管理后台</span>
     </div>
     <div>
-      <el-button size="small" :icon="'Key'" @click="openApiKeyDialog">设置密钥</el-button>
+      <el-button size="small" :icon="'SwitchButton'" @click="onLogout">退出登录</el-button>
       <el-button size="small" :icon="'Back'" @click="goBack">返回列表</el-button>
     </div>
   </div>
@@ -120,13 +120,10 @@ const app = createApp({
       content: [{ max: 10000, message: '最多 10000 字', trigger: 'blur' }],
     };
 
-    // 对外调用地址（复制用），与后端 runtime 路由一致
+    // 对外调用地址（复制用），与后端 runtime 路由一致；接口无需密钥
     const callPath = computed(() => {
       const p = form.path ? form.path : '[path]';
-      const key = JSQ.getApiKeyFromUrl();
-      let url = JSQ.API_BASE + '?route=runtime&path=' + encodeURIComponent(p);
-      if (key) url += '&key=' + encodeURIComponent(key);
-      return url;
+      return JSQ.buildApiUrl(p);
     });
 
     function limitCodePoints(value, max) {
@@ -143,8 +140,8 @@ const app = createApp({
 
     function goBack() { location.href = 'index.html'; }
 
-    async function openApiKeyDialog() {
-      await JSQ.promptApiKey();
+    function onLogout() {
+      JSQ.logout();
     }
 
     async function loadDetail() {
@@ -197,14 +194,13 @@ const app = createApp({
       }
     }
 
-    onMounted(() => {
-      if (!JSQ.getToken()) {
-        ElMessage.warning('请先设置管理员 TOKEN');
-      }
+    onMounted(async () => {
+      const ok = await JSQ.ensureLogin();
+      if (!ok) return;
       loadDetail();
     });
 
-    return { JSQ, form, formRef, rules, isEdit, loading, saving, callPath, onSave, goBack, onNameInput, onContentInput, openApiKeyDialog };
+    return { JSQ, form, formRef, rules, isEdit, loading, saving, callPath, onSave, goBack, onNameInput, onContentInput, onLogout };
   },
 }).use(ElementPlus);
 

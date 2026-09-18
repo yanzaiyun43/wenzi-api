@@ -1,9 +1,13 @@
 /**
  * 旧识桥 api · admin/js/app.js
  * ----------------------------------------------------------------
- * 全局公共逻辑：API_BASE、axios 实例、鉴权拦截器、公共工具函数。
+ * 全局公共逻辑：API_BASE、axios 实例、登录会话、公共工具函数。
  * 前端为纯静态页（Vue3 + Element Plus + axios，CDN 锁版本引入），
  * 后端地址在此集中配置。部署时修改 window.APP_CONFIG 即可。
+ *
+ * 鉴权方式：账号 + 密码登录换取会话令牌，令牌随后放在
+ * X-Admin-Token 请求头里；明文令牌只保存在浏览器 localStorage。
+ * 对外调用接口（runtime）不需要任何密钥。
  * ----------------------------------------------------------------
  */
 
@@ -18,28 +22,29 @@ if (window.ElementPlus) {
   window.ElMessageBox = window.ElementPlus.ElMessageBox;
 }
 
-// 管理员 TOKEN 存取（localStorage）
-const ADMIN_TOKEN_KEY = 'jiushiqiao_admin_token';
+// 登录会话令牌存取（localStorage）
+const ADMIN_SESSION_KEY = 'jiushiqiao_admin_session';
 function getToken() {
-  return localStorage.getItem(ADMIN_TOKEN_KEY) || '';
+  return localStorage.getItem(ADMIN_SESSION_KEY) || '';
 }
 function setToken(t) {
-  if (t) { localStorage.setItem(ADMIN_TOKEN_KEY, t); }
-  else { localStorage.removeItem(ADMIN_TOKEN_KEY); }
+  if (t) { localStorage.setItem(ADMIN_SESSION_KEY, t); }
+  else { localStorage.removeItem(ADMIN_SESSION_KEY); }
 }
 
-// API 密钥存取（localStorage）——用于复制地址时自动拼接 key
-const API_KEY_KEY = 'jiushiqiao_api_key';
-function getApiKey() {
-  return localStorage.getItem(API_KEY_KEY) || '';
-}
-function setApiKey(k) {
-  if (k) { localStorage.setItem(API_KEY_KEY, k); }
-  else { localStorage.removeItem(API_KEY_KEY); }
+// 登录页地址（带回来路，登录后跳回原页面）
+function loginUrl(next) {
+  const base = new URL('login.html', document.baseURI);
+  const target = next || (location.pathname + location.search);
+  if (target && target.indexOf('login.html') === -1) {
+    base.searchParams.set('next', target);
+  }
+  return base.href;
 }
 
-// 401 处理全局锁：防止并发请求同时触发多个弹窗
-let isHandling401 = false;
+function isLoginPage() {
+  return location.pathname.indexOf('login.html') !== -1;
+}
 
 // axios 实例
 const http = axios.create({
@@ -47,7 +52,7 @@ const http = axios.create({
   timeout: 15000,
 });
 
-// 请求拦截器：统一带 X-Admin-Token
+// 请求拦截器：统一带会话令牌
 http.interceptors.request.use(function (config) {
   const token = getToken();
   if (token) {
@@ -73,48 +78,23 @@ http.interceptors.response.use(function (response) {
   }
   // 非 JSON（如 runtime 纯文本）原样返回
   return data;
-}, async function (error) {
+}, function (error) {
   const resp = error.response;
-  const originalRequest = error.config;
+  const originalRequest = error.config || {};
+  const url = String(originalRequest.url || '');
 
-  // 401 未授权：全局锁防并发弹窗，等待用户输入新 token 后自动重试原请求（最多 1 次）
-  if (resp && resp.status === 401 && !originalRequest._retry401) {
-    originalRequest._retry401 = true; // 防止循环重试
-
-    // 等待其它并发 401 处理完成
-    while (isHandling401) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-
-    // 双重检查：等待期间可能已被其它请求刷新了 token
-    if (getToken() && getToken() !== originalRequest.headers?.['X-Admin-Token']) {
-      return http.request(originalRequest);
-    }
-
-    isHandling401 = true;
-    try {
-      setToken(''); // 先清旧 token
-
+  // 401 未授权：清掉本地令牌并回到登录页（登录接口本身的 401 交给页面处理）
+  if (resp && resp.status === 401 && url.indexOf('admin/login') === -1) {
+    setToken('');
+    if (!isLoginPage()) {
       if (window.ElMessage) {
-        ElMessage.error('未授权，请重新输入管理员 TOKEN');
+        ElMessage.error('登录已过期，请重新登录');
       }
-
-      // 等待用户完成输入（含取消）
-      const ok = await promptAdminToken();
-
-      if (ok) {
-        // 用户输了新 token，自动重试原请求（会带上新 token）
-        return http.request(originalRequest);
-      }
-
-      // 用户取消：不重试，直接抛错让上层处理
-      return Promise.reject(error);
-    } finally {
-      isHandling401 = false;
+      location.href = loginUrl();
     }
+    return Promise.reject(error);
   }
 
-  // 其它错误
   if (window.ElMessage) {
     const msg = (resp && resp.data && resp.data.msg)
       || error.message || '网络错误';
@@ -140,6 +120,93 @@ async function apiRequest(route, params, method, data) {
   }
   return http.request(payload);
 }
+
+// ---- 登录会话 ----
+
+/** 查询会话状态：{ need_init, logged_in, username }。 */
+async function fetchSession() {
+  return http.request({
+    method: 'GET',
+    params: { route: 'admin/session' },
+  });
+}
+
+/**
+ * 页面守卫：进管理页前调用。
+ * 未登录 -> 跳登录页；还没有管理员账号 -> 跳登录页做初始化。
+ * 返回 Promise<boolean>：true=已登录，可继续加载数据。
+ */
+async function ensureLogin() {
+  try {
+    const s = await fetchSession();
+    if (s && s.need_init) {
+      if (!isLoginPage()) location.href = loginUrl();
+      return false;
+    }
+    if (!s || !s.logged_in) {
+      setToken('');
+      if (!isLoginPage()) location.href = loginUrl();
+      return false;
+    }
+    currentUser = s.username || '';
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+let currentUser = '';
+
+/** 账号 + 密码登录；成功后保存令牌。 */
+async function login(username, password) {
+  const data = await http.request({
+    method: 'POST',
+    params: { route: 'admin/login' },
+    data: { username: username, password: password },
+  });
+  setToken(data.token);
+  currentUser = data.username || username;
+  return data;
+}
+
+/** 首次初始化管理员账号（仅当系统还没有任何账号）。 */
+async function initAdmin(username, password) {
+  const data = await http.request({
+    method: 'POST',
+    params: { route: 'admin/init' },
+    data: { username: username, password: password },
+  });
+  setToken(data.token);
+  currentUser = data.username || username;
+  return data;
+}
+
+/** 修改密码（需登录）。 */
+async function changePassword(oldPassword, newPassword) {
+  return apiRequest('admin/password', null, 'POST', {
+    old_password: oldPassword,
+    new_password: newPassword,
+  });
+}
+
+/** 退出登录：服务端销毁会话，本地清令牌并回登录页。 */
+async function logout() {
+  try {
+    await apiRequest('admin/logout', null, 'POST', {});
+  } catch (e) {
+    // 会话可能已失效，忽略错误继续清理本地状态
+  }
+  setToken('');
+  currentUser = '';
+  location.href = loginUrl('index.html');
+}
+
+/** 当前登录账号名（ensureLogin 成功后可用）。 */
+function getUsername() {
+  return currentUser;
+}
+
+// ---- 业务封装 ----
 
 /**
  * 新增/编辑 API。
@@ -231,98 +298,10 @@ function fmtTime(ts) {
 }
 
 /**
- * 构建对外调用地址（runtime）。
+ * 构建对外调用地址（runtime）。接口无需密钥，地址可直接分享。
  */
 function buildApiUrl(path) {
-  const key = getApiKeyFromUrl() || '';
-  let u = API_BASE + '?route=runtime&path=' + encodeURIComponent(path);
-  if (key) { u += '&key=' + encodeURIComponent(key); }
-  return u;
-}
-
-/**
- * 获取 API 密钥：优先 localStorage，其次 APP_CONFIG（部署时预设）。
- */
-function getApiKeyFromUrl() {
-  const local = getApiKey();
-  if (local) return local;
-  if (window.APP_CONFIG && window.APP_CONFIG.API_KEY) {
-    return window.APP_CONFIG.API_KEY;
-  }
-  return '';
-}
-
-/**
- * 提示输入/更新 API 密钥（Element Plus 内置输入弹窗）。
- * 返回 Promise<boolean>：true=已保存，false=取消。
- */
-function isCredentialFormatValid(value) {
-  return /^[a-zA-Z0-9_-]{16,128}$/.test(String(value || ''));
-}
-
-function promptApiKey() {
-  return new Promise((resolve) => {
-    if (!window.ElMessageBox) {
-      const k = window.prompt('请输入 API 访问密钥（key）', getApiKey());
-      if (k === null) { resolve(false); return; }
-      if (!isCredentialFormatValid(k)) {
-        if (window.alert) window.alert('密钥格式：16-128 位字母数字下划线中划线');
-        resolve(false);
-        return;
-      }
-      setApiKey(k);
-      resolve(true);
-      return;
-    }
-    ElMessageBox.prompt('请输入 API 访问密钥（key）', '设置密钥', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputValue: getApiKey(),
-      inputPattern: /^[a-zA-Z0-9_-]{16,128}$/,
-      inputErrorMessage: '密钥格式：16-128 位字母数字下划线中划线',
-    })
-      .then(({ value }) => {
-        setApiKey(value);
-        if (window.ElMessage) ElMessage.success('密钥已保存，复制地址将自动带上');
-        resolve(true);
-      })
-      .catch(() => resolve(false));
-  });
-}
-
-/**
- * 提示输入/更新管理员 TOKEN（Element Plus 内置输入弹窗）。
- * 返回 Promise<boolean>：true=已保存，false=取消。
- */
-function promptAdminToken() {
-  return new Promise((resolve) => {
-    if (!window.ElMessageBox) {
-      // 降级：Element Plus 未就绪时回退原生 prompt
-      const t = window.prompt('请输入管理员 TOKEN（X-Admin-Token）', getToken());
-      if (t === null) { resolve(false); return; }
-      if (!isCredentialFormatValid(t)) {
-        if (window.alert) window.alert('TOKEN 格式：16-128 位字母数字下划线中划线');
-        resolve(false);
-        return;
-      }
-      setToken(t);
-      resolve(true);
-      return;
-    }
-    ElMessageBox.prompt('请输入管理员 TOKEN（X-Admin-Token）', '设置 TOKEN', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputValue: getToken(),
-      inputPattern: /^[a-zA-Z0-9_-]{16,128}$/,
-      inputErrorMessage: 'TOKEN 格式：16-128 位字母数字下划线中划线',
-    })
-      .then(({ value }) => {
-        setToken(value);
-        if (window.ElMessage) ElMessage.success('TOKEN 已保存');
-        resolve(true);
-      })
-      .catch(() => resolve(false));
-  });
+  return API_BASE + '?route=runtime&path=' + encodeURIComponent(path);
 }
 
 // 暴露到 window 供各页面使用
@@ -331,10 +310,14 @@ window.JSQ = {
   http: http,
   getToken: getToken,
   setToken: setToken,
-  promptAdminToken: promptAdminToken,
-  getApiKey: getApiKey,
-  setApiKey: setApiKey,
-  promptApiKey: promptApiKey,
+  loginUrl: loginUrl,
+  fetchSession: fetchSession,
+  ensureLogin: ensureLogin,
+  login: login,
+  initAdmin: initAdmin,
+  changePassword: changePassword,
+  logout: logout,
+  getUsername: getUsername,
   apiRequest: apiRequest,
   saveApi: saveApi,
   deleteApi: deleteApi,
@@ -347,5 +330,4 @@ window.JSQ = {
   copyText: copyText,
   fmtTime: fmtTime,
   buildApiUrl: buildApiUrl,
-  getApiKeyFromUrl: getApiKeyFromUrl,
 };
