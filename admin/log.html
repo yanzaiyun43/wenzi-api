@@ -4,127 +4,78 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>旧识桥 api · 访问日志</title>
-<!-- CDN 锁版本：Vue3 / Element Plus / icons / axios -->
 <link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css">
+<link rel="stylesheet" href="css/theme.css">
 <script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
 <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
 <script src="https://unpkg.com/axios@1.7.2/dist/axios.min.js"></script>
 <script src="js/app.js"></script>
 <style>
-  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
-  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
-  .topbar .sub { color: #909399; font-size: 11px; margin-left: 8px; }
-  .wrap { padding: 12px 16px; }
-  .card { background: #fff; border-radius: 8px; padding: 16px; }
-  .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  .toolbar .grow { flex: 1; }
-  .ip { font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
-  .params { white-space: pre-wrap; word-break: break-all; color: #606266; max-height: 90px; overflow: auto; font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
-  .pager { display: flex; justify-content: flex-end; align-items: center; margin-top: 12px; gap: 8px; }
-  /* 卡片式布局 */
-  .card-list { display: flex; flex-direction: column; gap: 12px; }
-  .log-card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-  .log-card .card-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .log-card .label { color: #909399; font-size: 12px; }
-  .log-card .ip { font-size: 12px; }
-  .log-card .card-body { display: flex; flex-direction: column; gap: 4px; }
-  .log-card .card-field { display: flex; gap: 8px; font-size: 13px; }
-  .log-card .card-field .label { color: #909399; min-width: 56px; }
-  .log-card .params { white-space: pre-wrap; word-break: break-all; color: #606266; max-height: 80px; overflow: auto; font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
-
-  @media (max-width: 480px) {
-    .topbar { padding: 10px 12px; }
-    .topbar h1 { font-size: 15px; }
-    .wrap { padding: 8px 12px; }
-    .card { padding: 12px; }
-    .toolbar { gap: 6px; }
-    .el-date-picker { width: 100% !important; }
-    .params { font-size: 10px; }
-    .ip { font-size: 10px; }
-    .el-dialog { width: 92% !important; margin: 0 4% !important; }
-    .el-dialog__body { padding: 16px !important; }
-  }
+  .pager { display: flex; justify-content: flex-end; margin-top: 14px; }
+  .log-card { background: #fff; border: 1px solid var(--el-border-color); border-radius: 8px; padding: 14px; }
+  .log-card + .log-card { margin-top: 10px; }
+  .log-card .h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; font-size: 13px; }
+  .log-card .h .k { color: var(--el-text-color-secondary); }
+  .log-card .params { max-height: 90px; overflow: auto; font-size: 12px; }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="topbar">
     <div>
-      <h1 style="display:inline-block">访问日志</h1>
-      <span class="sub" v-if="apiId">API #{{ apiId }}</span>
-      <span class="sub" v-else>全部调用</span>
+      <h1>访问日志</h1>
+      <span class="sub">{{ apiId ? 'API #' + apiId : '全部调用' }}</span>
     </div>
-    <div>
-      <el-button size="small" :icon="'Back'" @click="goBack">返回列表</el-button>
+    <div class="actions">
+      <el-button size="small" @click="goBack">返回列表</el-button>
     </div>
   </div>
 
   <div class="wrap">
     <div class="card">
       <div class="toolbar">
-        <el-input v-model="query.ip" placeholder="按 IP 筛选" clearable style="width:180px" @keyup.enter="onSearch" @clear="onSearch">
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-date-picker
-          v-model="timeRange"
-          type="datetimerange"
-          range-separator="至"
-          start-placeholder="开始时间"
-          end-placeholder="结束时间"
-          value-format="YYYY-MM-DD HH:mm:ss"
-          style="width:360px"
-          @change="onSearch"
-        ></el-date-picker>
-        <el-button type="primary" :icon="'Search'" @click="onSearch">搜索</el-button>
-        <el-button :icon="'Refresh'" @click="reload">刷新</el-button>
+        <el-input v-model="query.ip" placeholder="按 IP 筛选" clearable style="width:180px" @keyup.enter="onSearch" @clear="onSearch" :prefix-icon="'Search'"></el-input>
+        <el-date-picker v-model="timeRange" type="datetimerange" range-separator="至"
+          start-placeholder="开始时间" end-placeholder="结束时间" value-format="YYYY-MM-DD HH:mm:ss"
+          style="width:360px" @change="onSearch"></el-date-picker>
+        <el-button type="primary" @click="onSearch">搜索</el-button>
+        <el-button @click="reload">刷新</el-button>
         <span class="grow"></span>
-        <el-button type="danger" plain :icon="'Delete'" @click="onClear">清空</el-button>
+        <el-button class="danger-text" plain @click="onClear">清空</el-button>
       </div>
 
-      <el-table :data="list" border stripe v-loading="tableLoading" v-show="!isMobile">
-        <el-table-column type="index" label="#" width="55" align="center"></el-table-column>
-        <el-table-column label="Id" prop="id" width="70" align="center"></el-table-column>
+      <el-table :data="list" v-loading="tableLoading" v-show="!isMobile">
+        <el-table-column label="ID" prop="id" width="70" align="center"></el-table-column>
         <el-table-column label="API" prop="api_id" width="80" align="center"></el-table-column>
-        <el-table-column label="IP" width="160">
-          <template #default="{ row }">
-            <span class="ip">{{ row.ip || '-' }}</span>
-          </template>
+        <el-table-column label="IP" width="170">
+          <template #default="{ row }"><span class="mono">{{ row.ip || '-' }}</span></template>
         </el-table-column>
         <el-table-column label="调用时间" width="170">
           <template #default="{ row }">{{ JSQ.fmtTime(row.call_time) }}</template>
         </el-table-column>
-        <el-table-column label="参数（脱敏）" min-width="260">
-          <template #default="{ row }">
-            <div class="params">{{ row.params }}</div>
-          </template>
+        <el-table-column label="参数" min-width="260">
+          <template #default="{ row }"><div class="params">{{ row.params }}</div></template>
         </el-table-column>
       </el-table>
 
-      <!-- 移动端卡片式布局 -->
-      <div class="card-list" v-show="isMobile">
+      <!-- 移动端卡片 -->
+      <div v-show="isMobile">
         <div class="log-card" v-for="row in list" :key="row.id">
-          <div class="card-header">
-            <span class="mono">#{{ row.id }}</span>
-            <span class="label">API #{{ row.api_id }}</span>
-            <span class="ip">{{ row.ip }}</span>
+          <div class="h">
+            <span class="k">#{{ row.id }}</span>
+            <span class="k">API #{{ row.api_id }}</span>
+            <span class="mono">{{ row.ip }}</span>
           </div>
-          <div class="card-body">
-            <div class="card-field"><span class="label">时间</span><span>{{ JSQ.fmtTime(row.call_time) }}</span></div>
-            <div class="card-field"><span class="label">参数</span><span class="params">{{ row.params }}</span></div>
-          </div>
+          <div class="h"><span class="k">时间</span><span>{{ JSQ.fmtTime(row.call_time) }}</span></div>
+          <div class="params">{{ row.params }}</div>
         </div>
       </div>
 
       <div class="pager" v-show="!isMobile">
-        <el-pagination
-          layout="total, prev, pager, next, jumper"
-          :total="total"
-          :page-size="query.page_size"
-          :current-page="query.page"
-          @current-change="onPageChange"
-        ></el-pagination>
+        <el-pagination background layout="total, prev, pager, next"
+          :total="total" :page-size="query.page_size" :current-page="query.page"
+          @current-change="onPageChange"></el-pagination>
       </div>
     </div>
   </div>
@@ -143,9 +94,8 @@ const app = createApp({
     const timeRange = ref([]);
     const query = reactive({ ip: '', page: 1, page_size: 20 });
 
-    // 移动端检测（卡片式布局）
     const isMobile = ref(false);
-    function checkMobile() { isMobile.value = window.innerWidth <= 480; }
+    function checkMobile() { isMobile.value = window.innerWidth <= 768; }
     onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile); });
     onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
 
@@ -155,17 +105,10 @@ const app = createApp({
       if (typeof value !== 'string') return null;
       const m = value.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
       if (!m) return null;
-      const date = new Date(
-        Number(m[1]), Number(m[2]) - 1, Number(m[3]),
-        Number(m[4]), Number(m[5]), Number(m[6])
-      );
-      // Date 会自动进位，回读字段以拒绝 02-31 这类无效日期。
-      if (date.getFullYear() !== Number(m[1]) ||
-          date.getMonth() !== Number(m[2]) - 1 ||
-          date.getDate() !== Number(m[3]) ||
-          date.getHours() !== Number(m[4]) ||
-          date.getMinutes() !== Number(m[5]) ||
-          date.getSeconds() !== Number(m[6])) {
+      const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+      if (date.getFullYear() !== Number(m[1]) || date.getMonth() !== Number(m[2]) - 1 ||
+          date.getDate() !== Number(m[3]) || date.getHours() !== Number(m[4]) ||
+          date.getMinutes() !== Number(m[5]) || date.getSeconds() !== Number(m[6])) {
         return null;
       }
       return date;
@@ -191,7 +134,6 @@ const app = createApp({
         list.value = data.list || [];
         total.value = data.total || 0;
       } catch (e) {
-        // 拦截器已提示
       } finally {
         tableLoading.value = false;
       }
@@ -203,15 +145,13 @@ const app = createApp({
 
     async function onClear() {
       const msg = apiId.value
-        ? '确定清空 API #' + apiId.value + ' 的所有日志？此操作不可恢复。'
-        : '确定清空全部访问日志？此操作不可恢复。';
+        ? '确定清空 API #' + apiId.value + ' 的所有日志？'
+        : '确定清空全部访问日志？';
       try {
         await ElMessageBox.confirm(msg, '清空确认', {
           type: 'warning', confirmButtonText: '清空', cancelButtonText: '取消',
         });
-      } catch (e) {
-        return;
-      }
+      } catch (e) { return; }
       try {
         const payload = {};
         if (apiId.value) payload.api_id = apiId.value;
@@ -219,9 +159,7 @@ const app = createApp({
         ElMessage.success('已清空 ' + (res && res.deleted != null ? res.deleted : 0) + ' 条');
         query.page = 1;
         loadList();
-      } catch (e) {
-        // 拦截器已提示
-      }
+      } catch (e) {}
     }
 
     onMounted(async () => {
@@ -232,24 +170,14 @@ const app = createApp({
       loadList();
     });
 
-    return {
-      JSQ, apiId, list, total, tableLoading, timeRange, query,
-      goBack, onSearch, onPageChange, reload, onClear,
-      isMobile,
-    };
+    return { JSQ, apiId, list, total, tableLoading, timeRange, query, goBack, onSearch, onPageChange, reload, onClear, isMobile };
   },
 }).use(ElementPlus);
 
-// 注册图标组件（支持 :icon="'Search'" 等字符串写法）
 if (window.ElementPlusIconsVue) {
   for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
     app.component(name, comp);
   }
-}
-
-// 引入 MessageBox
-if (window.ElementPlus.ElMessageBox) {
-  app.config.globalProperties.$msgbox = window.ElementPlus.ElMessageBox;
 }
 
 app.mount('#app');

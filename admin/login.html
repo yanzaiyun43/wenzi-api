@@ -3,61 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>旧识桥 api · 管理后台登录</title>
-<!-- CDN 锁版本：Vue3 / Element Plus / icons / axios -->
+<title>旧识桥 api · 登录</title>
 <link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css">
+<link rel="stylesheet" href="css/theme.css">
 <script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
 <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
 <script src="https://unpkg.com/axios@1.7.2/dist/axios.min.js"></script>
 <script src="js/app.js"></script>
 <style>
-  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
-  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
-  .card { width: 100%; max-width: 380px; background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
-  .card h1 { margin: 0 0 4px; font-size: 18px; color: #303133; }
-  .card .sub { color: #909399; font-size: 12px; margin-bottom: 18px; }
-  .tip { color: #909399; font-size: 12px; line-height: 1.6; margin-top: 12px; }
-  .mono { font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
-  .back { text-align: center; margin-top: 14px; }
-  .back a { color: #909399; font-size: 12px; text-decoration: none; }
-  @media (max-width: 480px) {
-    .card { padding: 18px; }
-  }
+  .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .login-card { width: 100%; max-width: 360px; background: #fff; border: 1px solid var(--el-border-color); border-radius: 8px; padding: 28px; }
+  .login-card h1 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+  .login-card .sub { color: var(--el-text-color-secondary); font-size: 13px; margin-bottom: 22px; }
+  .tip { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.7; margin-top: 14px; }
+  .back { text-align: center; margin-top: 18px; }
+  .back a { color: var(--el-text-color-secondary); font-size: 12px; text-decoration: none; }
+  .back a:hover { color: var(--el-text-color-primary); }
 </style>
 </head>
 <body>
 <div id="app">
   <div class="page">
-    <div class="card">
+    <div class="login-card">
       <h1>{{ needInit ? '初始化管理员账号' : '管理后台登录' }}</h1>
-      <div class="sub">{{ needInit ? '系统还没有管理员账号，请先设置账号和密码' : '使用账号和密码登录，管理 API 与素材' }}</div>
+      <div class="sub">{{ needInit ? '设置账号和密码后进入后台' : '账号密码登录' }}</div>
 
       <el-form :model="form" :rules="rules" ref="formRef" label-position="top" @submit.prevent>
         <el-form-item label="账号" prop="username">
           <el-input v-model="form.username" placeholder="管理员账号" autocomplete="username" :prefix-icon="'User'"></el-input>
         </el-form-item>
-
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password placeholder="管理员密码" autocomplete="current-password" :prefix-icon="'Lock'" @keyup.enter="onSubmit"></el-input>
         </el-form-item>
-
         <el-form-item v-if="needInit" label="确认密码" prop="password2">
-          <el-input v-model="form.password2" type="password" show-password placeholder="再输入一次密码" autocomplete="new-password" :prefix-icon="'Lock'" @keyup.enter="onSubmit"></el-input>
+          <el-input v-model="form.password2" type="password" show-password placeholder="再输入一次" autocomplete="new-password" :prefix-icon="'Lock'" @keyup.enter="onSubmit"></el-input>
         </el-form-item>
-
         <el-button type="primary" style="width:100%" :loading="submitting" @click="onSubmit">
           {{ needInit ? '创建账号并进入' : '登录' }}
         </el-button>
       </el-form>
 
-      <div class="tip" v-if="needInit">
-        账号 3-32 位字母数字下划线点中划线，密码至少 8 位。创建后即可进入后台，建议进去后用「修改密码」改成自己好记的密码。
-      </div>
-      <div class="tip" v-else>
-        忘记密码：删除服务器上的 <span class="mono">api/install.lock</span> 后重新访问
-        <span class="mono">api/install.php</span> 重装即可重置账号密码（业务数据保留）。
-      </div>
+      <div class="tip" v-if="needInit">账号 3-32 位，密码至少 8 位。</div>
+      <div class="tip" v-else>忘记密码：删除 <span class="mono">api/install.lock</span> 后访问 <span class="mono">api/install.php</span> 重装重置。</div>
 
       <div class="back"><a href="../">返回统计门户</a></div>
     </div>
@@ -74,11 +62,7 @@ const app = createApp({
     const needInit = ref(false);
     const submitting = ref(false);
 
-    const form = reactive({
-      username: '',
-      password: '',
-      password2: '',
-    });
+    const form = reactive({ username: '', password: '', password2: '' });
 
     const rules = {
       username: [
@@ -89,15 +73,12 @@ const app = createApp({
         { required: true, message: '请输入密码', trigger: 'blur' },
         { min: 8, max: 128, message: '密码长度 8-128 位', trigger: 'blur' },
       ],
-      password2: [
-        { required: true, message: '请再次输入密码', trigger: 'blur' },
-      ],
+      password2: [{ required: true, message: '请再次输入密码', trigger: 'blur' }],
     };
 
     function nextTarget() {
       const q = new URLSearchParams(location.search);
       const next = q.get('next') || '';
-      // 只允许站内相对跳转，避免被 ?next= 带去外站
       if (next && next.indexOf('://') === -1 && next.indexOf('//') !== 0) {
         return next;
       }
@@ -107,9 +88,7 @@ const app = createApp({
     async function onSubmit() {
       try {
         await formRef.value.validate();
-      } catch (e) {
-        return;
-      }
+      } catch (e) { return; }
       if (needInit.value && form.password !== form.password2) {
         ElMessage.error('两次输入的密码不一致');
         return;
@@ -125,14 +104,12 @@ const app = createApp({
         }
         location.href = nextTarget();
       } catch (e) {
-        // 拦截器已提示
       } finally {
         submitting.value = false;
       }
     }
 
     onMounted(async () => {
-      // 已登录就直接进后台，避免重复登录
       try {
         const s = await JSQ.fetchSession();
         needInit.value = !!(s && s.need_init);
@@ -140,7 +117,6 @@ const app = createApp({
           location.href = nextTarget();
         }
       } catch (e) {
-        // 会话查询失败时按普通登录处理
       }
     });
 
@@ -148,7 +124,6 @@ const app = createApp({
   },
 }).use(ElementPlus);
 
-// 注册图标组件（支持 :icon="'User'" 等字符串写法）
 if (window.ElementPlusIconsVue) {
   for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
     app.component(name, comp);

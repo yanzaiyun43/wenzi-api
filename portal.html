@@ -6,47 +6,63 @@
 <title>旧识桥 api · 统计门户</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; color: #303133; line-height: 1.6; }
-  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
-  .topbar .sub { color: #909399; font-size: 12px; margin-left: 8px; }
-  .topbar a { color: #409eff; text-decoration: none; font-size: 13px; }
-  .wrap { padding: 12px 16px; max-width: 1000px; margin: 0 auto; }
-  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-  .stat-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center; }
-  .stat-card .num { font-size: 28px; font-weight: 600; color: #409eff; line-height: 1; margin-bottom: 4px; }
-  .stat-card .label { font-size: 13px; color: #909399; }
-  .empty { text-align: center; color: #909399; padding: 40px 0; }
-  .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e4e7ed; text-align: center; color: #909399; font-size: 12px; }
-  .loading { text-align: center; color: #909399; padding: 40px 0; }
-  .error { text-align: center; color: #f56c6c; padding: 40px 0; }
+  :root {
+    --bg: #F7F7F5; --card: #FFFFFF; --ink: #1F2328; --text: #4B5563; --muted: #6B7280;
+    --line: #E5E7EB; --hover: #F3F4F6; --primary: #334155; --primary-hover: #1F2937; --primary-bg: #E8EBEF;
+  }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "PingFang SC","Microsoft YaHei","Noto Sans SC",-apple-system,sans-serif; font-size: 14px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "JetBrains Mono","SFMono-Regular",Consolas,monospace; }
 
-  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
-  .section-head h2 { font-size: 15px; margin: 0; color: #303133; }
-  .section-head .hint { color: #909399; font-size: 12px; }
+  .topbar { background: var(--card); border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .topbar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+  .topbar .sub { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .topbar a { color: var(--primary); text-decoration: none; font-size: 13px; }
+  .topbar a:hover { color: var(--primary-hover); }
+
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+  .overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 18px; text-align: center; }
+  .stat-card .num { font-size: 26px; font-weight: 600; color: var(--primary); line-height: 1; margin-bottom: 6px; }
+  .stat-card .label { font-size: 13px; color: var(--muted); }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+  .section-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
+  .section-head .hint { color: var(--muted); font-size: 12px; }
+
   .api-list { display: flex; flex-direction: column; gap: 10px; }
-  .api-item { background: #fff; border-radius: 8px; padding: 12px 14px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-  .api-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-  .api-name { font-weight: 600; font-size: 14px; }
-  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; line-height: 18px; }
-  .tag-template { background: #fdf6ec; color: #e6a23c; }
-  .tag-random { background: #f0f9eb; color: #67c23a; }
-  .mono { font-family: "SF Mono",Consolas,monospace; font-size: 12px; word-break: break-all; }
+  .api-item { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .api-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .api-name { font-weight: 500; font-size: 14px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 12px; line-height: 18px; color: var(--muted); background: var(--hover); }
+  .tag.on { color: var(--primary); background: var(--primary-bg); }
+  .api-head .path { font-size: 12px; color: var(--muted); }
+
   .url-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .url-text { flex: 1 1 240px; background: #f7f8fa; border: 1px solid #ebeef5; border-radius: 6px; padding: 6px 8px; color: #606266; }
-  .btn { border: none; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; background: #409eff; color: #fff; white-space: nowrap; }
-  .btn:hover { background: #66b1ff; }
-  .btn.plain { background: #f0f2f5; color: #606266; }
-  .btn.plain:hover { background: #e4e7ed; }
-  .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); background: rgba(48,49,51,.92); color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 99; }
+  .url-text { flex: 1 1 240px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 12px; word-break: break-all; }
+  .btn { border: 1px solid var(--line); border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; background: var(--card); color: var(--text); white-space: nowrap; transition: background-color .15s ease, color .15s ease, border-color .15s ease; }
+  .btn:hover { background: var(--hover); color: var(--ink); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn.plain { background: var(--card); border-color: var(--line); color: var(--text); }
+  .btn.plain:hover { background: var(--hover); }
+  a.btn { text-decoration: none; display: inline-block; }
+
+  .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); background: rgba(31,35,40,.92); color: #fff; padding: 8px 16px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .15s ease; pointer-events: none; z-index: 99; }
   .toast.show { opacity: 1; }
 
+  .empty, .loading, .error { text-align: center; color: var(--muted); padding: 40px 0; font-size: 13px; }
+  .error { color: #B91C1C; }
+
+  @media (max-width: 768px) {
+    .wrap { padding: 12px; }
+    .overview { grid-template-columns: repeat(2, 1fr); }
+    .topbar { padding: 12px 14px; }
+  }
   @media (max-width: 480px) {
-    .topbar { padding: 10px 12px; }
-    .topbar h1 { font-size: 15px; }
-    .wrap { padding: 8px 12px; }
-    .stat-card { padding: 12px; }
-    .stat-card .num { font-size: 24px; }
+    .topbar h1 { font-size: 16px; }
+    .topbar .sub { display: block; margin-left: 0; margin-top: 2px; }
+    .stat-card { padding: 14px; }
     .url-text { flex: 1 1 100%; }
   }
 </style>
@@ -55,17 +71,17 @@
 <div class="topbar">
   <div>
     <h1>旧识桥 api</h1>
-    <span class="sub">公共统计门户</span>
+    <span class="sub">统计门户</span>
   </div>
-  <div><a href="admin/">进入管理后台</a></div>
+  <div><a href="admin/">管理后台</a></div>
 </div>
 
 <div class="wrap">
   <div id="overview" class="overview">
-    <div class="stat-card"><div class="num">-</div><div class="label">API 总数</div></div>
-    <div class="stat-card"><div class="num">-</div><div class="label">素材总数</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">接口</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">素材</div></div>
     <div class="stat-card"><div class="num">-</div><div class="label">调用总数</div></div>
-    <div class="stat-card"><div class="num">-</div><div class="label">今日调用</div></div>
+    <div class="stat-card"><div class="num">-</div><div class="label">今日</div></div>
   </div>
 
   <div id="statsStatus" class="loading">加载中…</div>
@@ -76,12 +92,10 @@
       <span class="hint" id="apiHint"></span>
     </div>
     <div class="api-list" id="apiList"></div>
-    <div style="margin-top:10px">
-      <button class="btn plain" id="copyAllBtn" type="button">复制全部调用地址</button>
+    <div style="margin-top:12px">
+      <button class="btn" id="copyAllBtn" type="button">复制全部地址</button>
     </div>
   </div>
-
-  <div class="footer">旧识桥 api 统计门户 · 数据实时更新</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -89,8 +103,7 @@
 <script>
 (function() {
   window.APP_CONFIG = window.APP_CONFIG || {};
-  const API_BASE = window.APP_CONFIG.API_BASE
-    || new URL('api/index.php', document.baseURI).href;
+  const API_BASE = window.APP_CONFIG.API_BASE || new URL('api/index.php', document.baseURI).href;
   const overviewEl = document.getElementById('overview');
   const statsStatusEl = document.getElementById('statsStatus');
   const apiSectionEl = document.getElementById('apiSection');
@@ -98,35 +111,34 @@
   const apiHintEl = document.getElementById('apiHint');
   const copyAllBtn = document.getElementById('copyAllBtn');
   const toastEl = document.getElementById('toast');
-
   let allApis = [];
 
   function fmtNum(n) {
-    if (n >= 10000) return (n/10000).toFixed(1) + 'w';
-    if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+    if (n >= 10000) return (n / 10000).toFixed(1) + 'w';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
     return String(n);
   }
 
   function renderOverview(data) {
     overviewEl.innerHTML = '';
     const items = [
-      { key: 'api_total', label: 'API 总数' },
-      { key: 'text_total', label: '素材总数' },
+      { key: 'api_total', label: '接口' },
+      { key: 'text_total', label: '素材' },
       { key: 'call_total', label: '调用总数' },
-      { key: 'call_today', label: '今日调用' },
+      { key: 'call_today', label: '今日' },
     ];
     items.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'stat-card';
+      const card = document.createElement('div');
+      card.className = 'stat-card';
       const num = document.createElement('div');
       num.className = 'num';
       num.textContent = fmtNum(data[item.key] || 0);
       const label = document.createElement('div');
       label.className = 'label';
       label.textContent = item.label;
-      div.appendChild(num);
-      div.appendChild(label);
-      overviewEl.appendChild(div);
+      card.appendChild(num);
+      card.appendChild(label);
+      overviewEl.appendChild(card);
     });
   }
 
@@ -143,9 +155,7 @@
 
   function copyText(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      return navigator.clipboard.writeText(text).catch(function () {
-        return copyTextFallback(text);
-      });
+      return navigator.clipboard.writeText(text).catch(function () { return copyTextFallback(text); });
     }
     return copyTextFallback(text);
   }
@@ -170,10 +180,10 @@
   function renderApis(apis) {
     allApis = apis || [];
     apiListEl.innerHTML = '';
+    apiSectionEl.style.display = 'block';
 
     if (!allApis.length) {
-      apiSectionEl.style.display = 'block';
-      apiHintEl.textContent = '暂无启用中的接口';
+      apiHintEl.textContent = '暂无启用接口';
       const empty = document.createElement('div');
       empty.className = 'empty';
       empty.textContent = '后台还没有启用任何接口';
@@ -182,58 +192,47 @@
       return;
     }
 
-    apiSectionEl.style.display = 'block';
-    apiHintEl.textContent = '共 ' + allApis.length + ' 个接口 · 无需密钥，复制地址即可调用';
+    apiHintEl.textContent = allApis.length + ' 个接口 · 无需密钥';
+    copyAllBtn.style.display = '';
 
     allApis.forEach(api => {
       const url = callUrl(api.path);
-
       const item = document.createElement('div');
       item.className = 'api-item';
 
       const head = document.createElement('div');
       head.className = 'api-head';
-
       const name = document.createElement('span');
       name.className = 'api-name';
       name.textContent = api.name || api.path;
-
       const tag = document.createElement('span');
-      tag.className = 'tag ' + (api.type === 'template' ? 'tag-template' : 'tag-random');
-      tag.textContent = api.type === 'template' ? '模板替换' : '随机素材';
-
-      const pathEl = document.createElement('span');
-      pathEl.className = 'mono';
-      pathEl.textContent = api.path;
-
+      tag.className = 'tag';
+      tag.textContent = api.type === 'template' ? '模板' : '随机';
+      const path = document.createElement('span');
+      path.className = 'mono path';
+      path.textContent = api.path;
       head.appendChild(name);
       head.appendChild(tag);
-      head.appendChild(pathEl);
+      head.appendChild(path);
 
       const row = document.createElement('div');
       row.className = 'url-row';
-
       const urlText = document.createElement('div');
       urlText.className = 'mono url-text';
       urlText.textContent = url;
-
       const copyBtn = document.createElement('button');
       copyBtn.className = 'btn';
       copyBtn.type = 'button';
       copyBtn.textContent = '复制';
       copyBtn.addEventListener('click', () => {
-        copyText(url).then(() => toast('已复制：' + api.path))
-          .catch(() => toast('复制失败，请手动选择地址'));
+        copyText(url).then(() => toast('已复制 ' + api.path)).catch(() => toast('复制失败'));
       });
-
       const openLink = document.createElement('a');
       openLink.className = 'btn plain';
       openLink.href = url;
       openLink.target = '_blank';
       openLink.rel = 'noopener';
       openLink.textContent = '打开';
-      openLink.style.textDecoration = 'none';
-
       row.appendChild(urlText);
       row.appendChild(copyBtn);
       row.appendChild(openLink);
@@ -259,19 +258,16 @@
           setStatus('', false);
           statsStatusEl.style.display = 'none';
         } else {
-          setStatus('加载失败：' + (res && res.msg ? res.msg : '未知错误'), true);
+          setStatus('加载失败', true);
         }
       })
-      .catch(e => {
-        setStatus('请求异常：' + e.message, true);
-      });
+      .catch(() => setStatus('请求失败', true));
   }
 
   copyAllBtn.addEventListener('click', () => {
     if (!allApis.length) return;
     const text = allApis.map(api => (api.name || api.path) + '\t' + callUrl(api.path)).join('\n');
-    copyText(text).then(() => toast('已复制全部 ' + allApis.length + ' 个接口地址'))
-      .catch(() => toast('复制失败，请手动选择地址'));
+    copyText(text).then(() => toast('已复制全部地址')).catch(() => toast('复制失败'));
   });
 
   loadStats();

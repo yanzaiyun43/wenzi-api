@@ -3,33 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>旧识桥 api · 新增 / 编辑 API</title>
-<!-- CDN 锁版本：Vue3 / Element Plus / icons / axios -->
+<title>旧识桥 api · 编辑接口</title>
 <link rel="stylesheet" href="https://unpkg.com/element-plus@2.7.6/dist/index.css">
+<link rel="stylesheet" href="css/theme.css">
 <script src="https://unpkg.com/vue@3.4.31/dist/vue.global.prod.js"></script>
 <script src="https://unpkg.com/element-plus@2.7.6/dist/index.full.min.js"></script>
 <script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
 <script src="https://unpkg.com/axios@1.7.2/dist/axios.min.js"></script>
 <script src="js/app.js"></script>
 <style>
-  body { margin: 0; background: #f5f6fa; font-family: -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
-  .topbar { background: #fff; border-bottom: 1px solid #e4e7ed; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
-  .topbar h1 { margin: 0; font-size: 16px; color: #303133; }
-  .topbar .sub { color: #909399; font-size: 11px; margin-left: 8px; }
-  .wrap { padding: 12px 16px; }
-  .form-card { background: #fff; border-radius: 8px; padding: 16px; max-width: 100%; }
-  .tip { color: #909399; font-size: 11px; line-height: 1.5; }
-  .mono { font-family: "SF Mono",Consolas,monospace; font-size: 11px; }
-
+  .form-card { background: #fff; border: 1px solid var(--el-border-color); border-radius: 8px; padding: 24px; max-width: 720px; }
+  .call-path { background: #F7F7F5; border: 1px solid var(--el-border-color); border-radius: 6px; padding: 8px 10px; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; color: var(--el-text-color-regular); word-break: break-all; margin-top: 6px; }
   @media (max-width: 480px) {
-    .topbar { padding: 10px 12px; }
-    .topbar h1 { font-size: 15px; }
-    .wrap { padding: 8px 12px; }
-    .form-card { padding: 12px; }
-    .el-form-item { margin-bottom: 16px; }
-    .el-input__inner { padding: 8px 10px; }
-    .el-dialog { width: 92% !important; margin: 0 4% !important; }
-    .el-dialog__body { padding: 16px !important; }
+    .form-card { padding: 14px; }
   }
 </style>
 </head>
@@ -37,49 +23,50 @@
 <div id="app">
   <div class="topbar">
     <div>
-      <h1 style="display:inline-block">{{ isEdit ? '编辑 API' : '新增 API' }}</h1>
-      <span class="sub">旧识桥 api 管理后台</span>
+      <h1>{{ isEdit ? '编辑接口' : '新增接口' }}</h1>
+      <span class="sub">接口配置</span>
     </div>
-    <div>
-      <el-button size="small" :icon="'SwitchButton'" @click="onLogout">退出登录</el-button>
-      <el-button size="small" :icon="'Back'" @click="goBack">返回列表</el-button>
+    <div class="actions">
+      <el-button size="small" @click="onLogout">退出登录</el-button>
+      <el-button size="small" @click="goBack">返回列表</el-button>
     </div>
   </div>
 
   <div class="wrap">
     <div class="form-card">
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="110px" v-loading="loading">
+      <el-form :model="form" :rules="rules" ref="formRef" label-position="top" v-loading="loading">
 
         <el-form-item label="Path" prop="path">
-          <el-input v-model="form.path" placeholder="唯一标识，字母数字下划线中划线，如 greeting" maxlength="64"></el-input>
-          <div class="tip">对外地址：<span class="mono">{{ callPath }}</span></div>
+          <el-input v-model="form.path" placeholder="唯一标识，如 greeting" maxlength="64"></el-input>
+          <div class="call-path">{{ callPath }}</div>
         </el-form-item>
 
         <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" @input="onNameInput" placeholder="API 名称，用于后台展示" maxlength="100"></el-input>
+          <el-input v-model="form.name" @input="onNameInput" placeholder="接口名称" maxlength="100"></el-input>
         </el-form-item>
 
         <el-form-item label="类型" prop="type">
           <el-radio-group v-model="form.type">
-            <el-radio value="random_text">random_text（随机一条素材）</el-radio>
-            <el-radio value="template">template（模板变量替换）</el-radio>
+            <el-radio value="random_text">随机素材</el-radio>
+            <el-radio value="template">模板变量</el-radio>
           </el-radio-group>
-          <div class="tip" v-if="form.type==='random_text'">文字素材请在「素材」页管理中新增；调用时随机返回其中一条。</div>
-          <div class="tip" v-else>模板内容支持 {{参数名}} 变量替换；调用方传参后自动替换（未传替换为空）。</div>
+          <div class="tip" v-if="form.type==='random_text'">每次调用随机返回一条素材。</div>
+          <div class="tip" v-else>支持 {{参数名}} 变量替换，未传参替换为空。</div>
         </el-form-item>
 
         <el-form-item label="模板内容" prop="content" v-if="form.type==='template'">
-          <el-input v-model="form.content" @input="onContentInput" type="textarea" :rows="7" placeholder="如：你好，{{ name }}！今天是 {{ date }}。" maxlength="10000" show-word-limit></el-input>
-          <div class="tip">使用 <span class="mono">{{参数名}}</span> 定义占位变量，调用方传对应参数即可替换。</div>
+          <el-input v-model="form.content" @input="onContentInput" type="textarea" :rows="7"
+            placeholder="如：你好，{{ name }}！" maxlength="10000" show-word-limit
+            style="font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace"></el-input>
         </el-form-item>
 
-        <el-form-item label="启用" prop="enabled">
+        <el-form-item label="状态">
           <el-switch v-model="form.enabled" :active-value="1" :inactive-value="0" active-text="启用" inactive-text="禁用"></el-switch>
         </el-form-item>
 
         <el-form-item>
-          <el-button type="primary" :icon="'Check'" :loading="saving" @click="onSave">保存</el-button>
-          <el-button :icon="'Back'" @click="goBack">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="onSave">保存</el-button>
+          <el-button @click="goBack">取消</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -89,7 +76,6 @@
 <script>
 const { createApp, ref, reactive, onMounted, computed } = Vue;
 
-// 全局注册 Element Plus 图标组件，使 :icon="'Back'" 这类字符串能解析为组件
 const app = createApp({
   setup() {
     const JSQ = window.JSQ;
@@ -120,7 +106,6 @@ const app = createApp({
       content: [{ max: 10000, message: '最多 10000 字', trigger: 'blur' }],
     };
 
-    // 对外调用地址（复制用），与后端 runtime 路由一致；接口无需密钥
     const callPath = computed(() => {
       const p = form.path ? form.path : '[path]';
       return JSQ.buildApiUrl(p);
@@ -129,20 +114,11 @@ const app = createApp({
     function limitCodePoints(value, max) {
       return Array.from(String(value || '')).slice(0, max).join('');
     }
-
-    function onNameInput(value) {
-      form.name = limitCodePoints(value, 100);
-    }
-
-    function onContentInput(value) {
-      form.content = limitCodePoints(value, 10000);
-    }
+    function onNameInput(value) { form.name = limitCodePoints(value, 100); }
+    function onContentInput(value) { form.content = limitCodePoints(value, 10000); }
 
     function goBack() { location.href = 'index.html'; }
-
-    function onLogout() {
-      JSQ.logout();
-    }
+    function onLogout() { JSQ.logout(); }
 
     async function loadDetail() {
       const q = new URLSearchParams(location.search);
@@ -159,7 +135,6 @@ const app = createApp({
         form.content = row.content || '';
         form.enabled = row.enabled === 1 ? 1 : 0;
       } catch (e) {
-        // 拦截器已提示
       } finally {
         loading.value = false;
       }
@@ -169,7 +144,6 @@ const app = createApp({
       try {
         await formRef.value.validate();
       } catch (e) { return; }
-      // 模板类型 content 必填
       if (form.type === 'template' && !form.content.trim()) {
         ElMessage.warning('模板内容不能为空');
         return;
@@ -185,10 +159,9 @@ const app = createApp({
         };
         if (isEdit.value) payload.id = editId.value;
         await JSQ.saveApi(payload);
-        ElMessage.success('保存成功');
+        ElMessage.success('已保存');
         goBack();
       } catch (e) {
-        // 拦截器已提示
       } finally {
         saving.value = false;
       }
@@ -204,7 +177,6 @@ const app = createApp({
   },
 }).use(ElementPlus);
 
-// 注册图标组件
 if (window.ElementPlusIconsVue) {
   for (const [name, comp] of Object.entries(window.ElementPlusIconsVue)) {
     app.component(name, comp);
