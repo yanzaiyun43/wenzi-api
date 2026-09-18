@@ -23,7 +23,7 @@ if (!defined('APP_ENTRY')) {
     exit('Forbidden');
 }
 
-// ============ 鉴权（账号 + 密码 → 会话令牌） ============
+// ============ 鉴权（账号 + 密码 转 会话令牌） ============
 
 /**
  * 客户端 IP（默认 REMOTE_ADDR；TRUST_X_FORWARDED_FOR 开启时取 XFF 第一段）。

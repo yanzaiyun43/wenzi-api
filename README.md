@@ -92,8 +92,8 @@ php api/install.php \
 
 访问 `/admin/`：
 
-- 已安装但还没有管理员账号 → 显示「初始化管理员账号」，设置后直接进入
-- 已有账号 → 账号 + 密码登录，会话默认 7 天（`ADMIN_SESSION_TTL`）
+- 已安装但还没有管理员账号，则显示「初始化管理员账号」，设置后直接进入
+- 已有账号，则账号 + 密码登录，会话默认 7 天（`ADMIN_SESSION_TTL`）
 - 登录后右上角可「修改密码」「退出登录」
 
 会话令牌保存在浏览器 `localStorage`，请求时通过 `X-Admin-Token` 头传递（兼容 `Authorization: Bearer <token>`）。
@@ -205,7 +205,7 @@ define('ADMIN_SESSION_TTL', 604800);     // 后台登录会话有效期（秒）
 SQLite，位于 `api/api.db`。六张表：
 
 - `api_config`：接口配置（path / name / type / content / enabled）
-- `api_text`：素材表（外键 → api_config）
+- `api_text`：素材表（外键指向 api_config）
 - `api_log`：调用日志（api_id / ip / call_time / params）
 - `admin_user`：管理员账号（username / password_hash）
 - `admin_session`：登录会话（token 的 sha256 摘要 / 过期时间）

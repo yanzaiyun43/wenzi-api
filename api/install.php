@@ -512,7 +512,7 @@ if (!$submitted) {
     <div class="err"><b>环境检查未通过</b>
       <ul class="check">
         <?php foreach ($envProblems as $p): ?>
-          <li class="fail">✗ <?php echo htmlspecialchars($p); ?></li>
+          <li class="fail">[x] <?php echo htmlspecialchars($p); ?></li>
         <?php endforeach; ?>
       </ul>
     </div>
@@ -520,7 +520,7 @@ if (!$submitted) {
 
     <?php if ($resultOk): ?>
       <div class="ok">
-        <b>✔ 安装成功！</b>
+        <b>安装成功！</b>
         管理员账号：<code><?php echo htmlspecialchars($formData['admin_user']); ?></code>
         管理员密码：<code><?php echo htmlspecialchars($formData['admin_pass']); ?></code>
 
@@ -549,7 +549,7 @@ if (!$submitted) {
         <div class="row">
           <div class="pw-wrap">
             <input type="password" name="admin_pass" id="admin_pass" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
-            <button type="button" class="eye" onclick="togglePw(this,'admin_pass')" title="显示/隐藏">👁</button>
+            <button type="button" class="eye" onclick="togglePw(this,'admin_pass')" title="显示/隐藏">显示</button>
           </div>
           <button type="button" class="btn-mini" onclick="randPass()">随机生成</button>
         </div>
@@ -557,7 +557,7 @@ if (!$submitted) {
         <label>确认密码</label>
         <div class="pw-wrap">
           <input type="password" name="admin_pass2" id="admin_pass2" value="<?php echo htmlspecialchars($formData['admin_pass']); ?>" autocomplete="new-password">
-          <button type="button" class="eye" onclick="togglePw(this,'admin_pass2')" title="显示/隐藏">👁</button>
+          <button type="button" class="eye" onclick="togglePw(this,'admin_pass2')" title="显示/隐藏">显示</button>
         </div>
 
         <label>允许的前端来源 <span class="hint">多个用逗号分隔；* 表示全部</span></label>
