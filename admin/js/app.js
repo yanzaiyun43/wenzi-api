@@ -7,9 +7,9 @@
  * ----------------------------------------------------------------
  */
 
-// 全局配置：部署时按需修改（默认 admin 与 api 同级时相对路径）
+// 全局配置：部署时按需修改。默认按当前页面所在目录推导同级 api/，兼容子目录部署。
 window.APP_CONFIG = window.APP_CONFIG || {};
-const API_BASE = window.APP_CONFIG.API_BASE || (location.origin + '/api/index.php');
+const API_BASE = window.APP_CONFIG.API_BASE || new URL('../api/index.php', document.baseURI).href;
 
 // Element Plus 的 CDN 版不会把命令式 API 挂到 window，这里统一挂载，
 // 供各页面与下方拦截器直接使用 ElMessage / ElMessageBox。
@@ -192,15 +192,30 @@ async function clearLog(params) {
  */
 function copyText(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text);
+    return navigator.clipboard.writeText(text).catch(function () {
+      return copyTextFallback(text);
+    });
   }
-  // 降级：临时 textarea
+  return copyTextFallback(text);
+}
+
+function copyTextFallback(text) {
   const ta = document.createElement('textarea');
   ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
   document.body.appendChild(ta);
   ta.select();
-  document.execCommand('copy');
-  document.body.removeChild(ta);
+  let copied = false;
+  try {
+    copied = document.execCommand('copy') === true;
+  } finally {
+    document.body.removeChild(ta);
+  }
+  if (!copied) {
+    return Promise.reject(new Error('clipboard copy failed'));
+  }
   return Promise.resolve();
 }
 
@@ -220,7 +235,7 @@ function fmtTime(ts) {
  */
 function buildApiUrl(path) {
   const key = getApiKeyFromUrl() || '';
-  let u = location.origin + '/api/index.php?route=runtime&path=' + encodeURIComponent(path);
+  let u = API_BASE + '?route=runtime&path=' + encodeURIComponent(path);
   if (key) { u += '&key=' + encodeURIComponent(key); }
   return u;
 }
@@ -241,11 +256,22 @@ function getApiKeyFromUrl() {
  * 提示输入/更新 API 密钥（Element Plus 内置输入弹窗）。
  * 返回 Promise<boolean>：true=已保存，false=取消。
  */
+function isCredentialFormatValid(value) {
+  return /^[a-zA-Z0-9_-]{16,128}$/.test(String(value || ''));
+}
+
 function promptApiKey() {
   return new Promise((resolve) => {
     if (!window.ElMessageBox) {
       const k = window.prompt('请输入 API 访问密钥（key）', getApiKey());
-      if (k !== null) { setApiKey(k); resolve(true); } else { resolve(false); }
+      if (k === null) { resolve(false); return; }
+      if (!isCredentialFormatValid(k)) {
+        if (window.alert) window.alert('密钥格式：16-128 位字母数字下划线中划线');
+        resolve(false);
+        return;
+      }
+      setApiKey(k);
+      resolve(true);
       return;
     }
     ElMessageBox.prompt('请输入 API 访问密钥（key）', '设置密钥', {
@@ -273,7 +299,14 @@ function promptAdminToken() {
     if (!window.ElMessageBox) {
       // 降级：Element Plus 未就绪时回退原生 prompt
       const t = window.prompt('请输入管理员 TOKEN（X-Admin-Token）', getToken());
-      if (t !== null) { setToken(t); resolve(true); } else { resolve(false); }
+      if (t === null) { resolve(false); return; }
+      if (!isCredentialFormatValid(t)) {
+        if (window.alert) window.alert('TOKEN 格式：16-128 位字母数字下划线中划线');
+        resolve(false);
+        return;
+      }
+      setToken(t);
+      resolve(true);
       return;
     }
     ElMessageBox.prompt('请输入管理员 TOKEN（X-Admin-Token）', '设置 TOKEN', {

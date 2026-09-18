@@ -67,7 +67,7 @@
       请在 API 列表页进入某个 API 的素材管理（或地址附带 ?api_id=xxx）。
     </el-alert>
 
-    <div class="card" v-loading="loading">
+    <div class="card">
       <div class="toolbar">
         <el-input v-model="keyword" placeholder="搜索素材内容" clearable style="width:260px" @keyup.enter="onSearch" @clear="onSearch">
           <template #prefix><el-icon><Search /></el-icon></template>
@@ -127,8 +127,7 @@
   <el-dialog v-model="dialogVisible" :title="editId ? '编辑素材' : '新增素材'" width="580px" @closed="onDialogClosed">
     <el-form :model="form" label-width="70px">
       <el-form-item label="内容" required>
-        <el-input v-model="form.content" type="textarea" :rows="7" placeholder="请输入文字素材内容"
-                  maxlength="5000" show-word-limit></el-input>
+        <el-input v-model="form.content" @input="onContentInput" type="textarea" :rows="7" placeholder="请输入文字素材内容"></el-input>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -140,8 +139,8 @@
   <!-- 批量导入对话框 -->
   <el-dialog v-model="batchDialogVisible" title="批量导入素材" width="640px" @closed="onBatchDialogClosed">
     <div class="batch-import-box">
-      <div class="batch-tab" :class="{ active: batchTab === 'file' }" @click="batchTab = 'file'">上传 .txt 文件</div>
-      <div class="batch-tab" :class="{ active: batchTab === 'paste' }" @click="batchTab = 'paste'">粘贴文本</div>
+      <div class="batch-tab" :class="{ active: batchTab === 'file' }" @click="batchTab = 'file'; updateBatchTotal()">上传 .txt 文件</div>
+      <div class="batch-tab" :class="{ active: batchTab === 'paste' }" @click="batchTab = 'paste'; updateBatchTotal()">粘贴文本</div>
 
       <div v-if="batchTab === 'file'">
         <el-upload
@@ -156,21 +155,22 @@
         >
           <el-button type="primary" :icon="'Upload'">选择文件</el-button>
           <template #tip>
-            <div class="el-upload__tip">仅支持 .txt 文件，每行一条素材</div>
+            <div class="el-upload__tip">仅支持 UTF-8 编码的 .txt 文件，每行一条素材</div>
           </template>
         </el-upload>
-        <div v-if="batchFileName" class="file-info">{{ batchFileName }} · 识别到 <b>{{ batchTotal }}</b> 条</div>
+        <div v-if="batchFileName" class="file-info">{{ batchFileName }} · 有效 <b>{{ batchTotal }}</b> 条<span v-if="batchInvalid">，无效 <b>{{ batchInvalid }}</b> 条</span></div>
       </div>
 
       <div v-else>
         <el-input
           v-model="batchPasteText"
+          @input="updateBatchTotal"
           type="textarea"
           :rows="10"
           placeholder="每行一条素材，直接粘贴多行文本…"
           style="width: 100%"
         ></el-input>
-        <div v-if="batchPasteText" class="paste-info">识别到 <b>{{ batchTotal }}</b> 条</div>
+        <div v-if="batchPasteText" class="paste-info">有效 <b>{{ batchTotal }}</b> 条<span v-if="batchInvalid">，无效 <b>{{ batchInvalid }}</b> 条</span></div>
       </div>
 
       <el-switch v-model="batchSkipDuplicate" :active-value="true" :inactive-value="false" active-text="跳过重复（批内 + 该 API 已有）" inactive-text="不去重" style="margin-top: 12px"></el-switch>
@@ -196,7 +196,6 @@ const app = createApp({
     const total = ref(0);
     const page = ref(1);
     const pageSize = ref(20);
-    const loading = ref(false);
     const tableLoading = ref(false);
 
     const dialogVisible = ref(false);
@@ -213,6 +212,7 @@ const app = createApp({
     const batchSkipDuplicate = ref(true);
     const batchSaving = ref(false);
     const batchTotal = ref(0);
+    const batchInvalid = ref(0);
 
     // 移动端检测（卡片式布局）
     const isMobile = ref(false);
@@ -268,24 +268,34 @@ const app = createApp({
       dialogVisible.value = true;
     }
 
+    function onContentInput(value) {
+      form.content = Array.from(String(value || '')).slice(0, 5000).join('');
+    }
+
     function onDialogClosed() {
       form.content = '';
     }
 
-    // 批量导入：计算识别条数
+    // 批量导入：统一解析有效行并统计无效行
+    function parseBatchText(text) {
+      const contents = [];
+      let invalid = 0;
+      String(text || '').split(/\r?\n/).forEach((line) => {
+        const value = line.trim();
+        if (value === '' || Array.from(value).length > 5000) {
+          invalid++;
+        } else {
+          contents.push(value);
+        }
+      });
+      return { contents, invalid };
+    }
+
     function updateBatchTotal() {
-      let text = '';
-      if (batchTab.value === 'file') {
-        text = batchFileName.value ? '' : ''; // file 由 onFileChange 处理
-      } else {
-        text = batchPasteText.value || '';
-      }
-      if (text) {
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
-        batchTotal.value = lines.length;
-      } else {
-        batchTotal.value = 0;
-      }
+      const text = batchTab.value === 'paste' ? batchPasteText.value : '';
+      const parsed = parseBatchText(text);
+      batchTotal.value = parsed.contents.length;
+      batchInvalid.value = parsed.invalid;
     }
 
     function onFileChange(file) {
@@ -294,11 +304,12 @@ const app = createApp({
       if (!file.raw) return;
       const reader = new FileReader();
       reader.onload = (e) => {
-        const text = e.target.result;
-        const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
-        batchTotal.value = lines.length;
+        const text = e.target && typeof e.target.result === 'string' ? e.target.result : '';
+        const parsed = parseBatchText(text);
+        batchTotal.value = parsed.contents.length;
+        batchInvalid.value = parsed.invalid;
       };
-      reader.readAsText(file.raw);
+      reader.readAsText(file.raw, 'UTF-8');
     }
 
     function openBatchImport() {
@@ -309,6 +320,7 @@ const app = createApp({
       batchPasteText.value = '';
       batchSkipDuplicate.value = true;
       batchTotal.value = 0;
+      batchInvalid.value = 0;
       batchDialogVisible.value = true;
     }
 
@@ -317,6 +329,7 @@ const app = createApp({
       batchFileName.value = '';
       batchPasteText.value = '';
       batchTotal.value = 0;
+      batchInvalid.value = 0;
     }
 
     async function onBatchSave() {
@@ -330,15 +343,19 @@ const app = createApp({
         const text = await new Promise((resolve) => {
           const reader = new FileReader();
           reader.onload = (e) => resolve(e.target.result);
-          reader.readAsText(batchFile.value);
+          reader.readAsText(batchFile.value, 'UTF-8');
         });
-        contents = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+        const parsed = parseBatchText(text);
+        contents = parsed.contents;
+        batchInvalid.value = parsed.invalid;
       } else {
         if (!batchPasteText.value.trim()) {
           ElMessage.warning('请粘贴文本内容');
           return;
         }
-        contents = batchPasteText.value.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && l.length <= 5000);
+        const parsed = parseBatchText(batchPasteText.value);
+        contents = parsed.contents;
+        batchInvalid.value = parsed.invalid;
       }
       if (contents.length === 0) {
         ElMessage.warning('未识别到有效素材（每行一条，非空且 ≤5000 字）');
@@ -355,7 +372,7 @@ const app = createApp({
           contents: contents,
           skip_duplicate: batchSkipDuplicate.value,
         });
-        ElMessage.success(`导入完成：新增 ${res.inserted} 条，跳过 ${res.skipped} 条`);
+        ElMessage.success(`导入完成：新增 ${res.inserted} 条，跳过 ${res.skipped} 条，无效 ${res.invalid || 0} 条`);
         batchDialogVisible.value = false;
         loadList();
       } catch (e) {
@@ -371,7 +388,7 @@ const app = createApp({
         ElMessage.warning('内容不能为空');
         return;
       }
-      if (content.length > 5000) {
+      if (Array.from(content).length > 5000) {
         ElMessage.warning('内容超长（最大 5000 字）');
         return;
       }
@@ -426,14 +443,15 @@ const app = createApp({
     return {
       JSQ,
       apiId, apiName, keyword, list, total, page, pageSize,
-      loading, tableLoading, dialogVisible, editId, saving, form,
+      tableLoading, dialogVisible, editId, saving, form,
       // 批量导入
       batchDialogVisible, batchTab, batchFileName, batchPasteText,
-      batchSkipDuplicate, batchSaving, batchTotal,
+      batchSkipDuplicate, batchSaving, batchTotal, batchInvalid,
       // 移动端
       isMobile,
       goBack, onSearch, onPageChange, reload, openAdd, openEdit,
-      onDialogClosed, onSave, onDelete,
+      onDialogClosed, onContentInput, onSave, onDelete,
+      updateBatchTotal,
       // 批量导入方法
       openBatchImport, onBatchDialogClosed, onBatchSave, onFileChange,
     };

@@ -18,3 +18,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# 安装生成的运行时配置（包含密钥）
+/api/config.php

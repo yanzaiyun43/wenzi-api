@@ -62,7 +62,7 @@
   </div>
 
   <div class="wrap">
-    <div class="card" v-loading="loading">
+    <div class="card">
       <div class="toolbar">
         <el-input v-model="query.ip" placeholder="按 IP 筛选" clearable style="width:180px" @keyup.enter="onSearch" @clear="onSearch">
           <template #prefix><el-icon><Search /></el-icon></template>
@@ -139,7 +139,6 @@ const app = createApp({
     const apiId = ref(0);
     const list = ref([]);
     const total = ref(0);
-    const loading = ref(false);
     const tableLoading = ref(false);
     const timeRange = ref([]);
     const query = reactive({ ip: '', page: 1, page_size: 20 });
@@ -152,15 +151,35 @@ const app = createApp({
 
     function goBack() { location.href = 'index.html'; }
 
+    function parseDateTimeLocal(value) {
+      if (typeof value !== 'string') return null;
+      const m = value.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
+      if (!m) return null;
+      const date = new Date(
+        Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+        Number(m[4]), Number(m[5]), Number(m[6])
+      );
+      // Date 会自动进位，回读字段以拒绝 02-31 这类无效日期。
+      if (date.getFullYear() !== Number(m[1]) ||
+          date.getMonth() !== Number(m[2]) - 1 ||
+          date.getDate() !== Number(m[3]) ||
+          date.getHours() !== Number(m[4]) ||
+          date.getMinutes() !== Number(m[5]) ||
+          date.getSeconds() !== Number(m[6])) {
+        return null;
+      }
+      return date;
+    }
+
     function buildParams() {
       const params = { page: query.page, page_size: query.page_size };
       if (apiId.value) params.api_id = apiId.value;
       if (query.ip) params.ip = query.ip;
       if (Array.isArray(timeRange.value) && timeRange.value.length === 2) {
-        const s = new Date(timeRange.value[0]);
-        const e = new Date(timeRange.value[1]);
-        if (!isNaN(s.getTime())) params.start_time = Math.floor(s.getTime() / 1000);
-        if (!isNaN(e.getTime())) params.end_time = Math.floor(e.getTime() / 1000);
+        const s = parseDateTimeLocal(timeRange.value[0]);
+        const e = parseDateTimeLocal(timeRange.value[1]);
+        if (s && !isNaN(s.getTime())) params.start_time = Math.floor(s.getTime() / 1000);
+        if (e && !isNaN(e.getTime())) params.end_time = Math.floor(e.getTime() / 1000);
       }
       return params;
     }
@@ -215,7 +234,7 @@ const app = createApp({
     });
 
     return {
-      JSQ, apiId, list, total, loading, tableLoading, timeRange, query,
+      JSQ, apiId, list, total, tableLoading, timeRange, query,
       goBack, onSearch, onPageChange, reload, onClear,
       isMobile,
     };

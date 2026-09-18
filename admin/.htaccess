@@ -1,8 +1,24 @@
 # ============================================================
 # 旧识桥 api · admin/.htaccess
 # ------------------------------------------------------------
-# 禁止列出目录（admin 为纯静态文件，直接访问具体文件不受影响）。
-# 若出现 500 或不支持 .htaccess，删除本文件即可。
+# admin 为纯静态前端：允许访问 HTML、JS、CSS 和图片，禁止目录列表，
+# 并拒绝访问隐藏文件、备份文件及可能误上传的服务端脚本/配置。
 # ============================================================
 
 Options -Indexes
+
+# 禁止访问隐藏文件、编辑器备份和常见配置文件
+<FilesMatch "^\.|~$|\.(bak|old|orig|swp|dist)$">
+  Require all denied
+</FilesMatch>
+
+# 后台不需要执行服务端脚本；误上传时不应被直接执行或下载
+<FilesMatch "\.(php[0-9]?|phtml|phar|cgi|pl|py|sh)$">
+  Require all denied
+</FilesMatch>
+
+# 基础浏览器安全响应头
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "same-origin"
+</IfModule>

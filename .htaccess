@@ -1,9 +1,10 @@
 # ============================================================
 # 旧识桥 api · 根目录 .htaccess
 # ------------------------------------------------------------
-# 1) 指定目录索引文件：访问域名根目录时优先执行 index.php
-#    （由它分流到安装向导或管理后台，不再出现目录列表）
+# 1) 指定目录索引文件：访问域名根目录时执行 index.php
+#    （由它分流到安装向导或统计门户，不再出现目录列表）
 # 2) 禁止列目录
+# 3) 拒绝直接下载数据库、配置和安装锁等敏感文件
 #
 # 若上传后该目录出现 500，通常是服务器不允许某条指令，
 # 删除本文件即可（index.php 一般仍可正常作为索引执行）。
@@ -14,3 +15,11 @@ DirectoryIndex index.php index.html
 
 # 禁止列目录
 Options -Indexes
+
+# 禁止直接下载根目录下可能存在的数据库、配置和安装锁文件
+<FilesMatch "\.(db|sqlite|sqlite3|sqlite2)$">
+  Require all denied
+</FilesMatch>
+<FilesMatch "^(\.env|install\.lock)$">
+  Require all denied
+</FilesMatch>

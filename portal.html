@@ -15,19 +15,6 @@
   .stat-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); text-align: center; }
   .stat-card .num { font-size: 28px; font-weight: 600; color: #409eff; line-height: 1; margin-bottom: 4px; }
   .stat-card .label { font-size: 13px; color: #909399; }
-  .api-list { display: flex; flex-direction: column; gap: 12px; }
-  .api-card { background: #fff; border-radius: 8px; padding: 12px 16px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-  .api-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .api-header .path { font-family: "SF Mono",Consolas,monospace; font-size: 14px; font-weight: 500; color: #303133; }
-  .api-header .name { color: #606266; font-size: 13px; }
-  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
-  .tag-success { background: #f0f9eb; color: #67c23a; }
-  .tag-warning { background: #fdf6ec; color: #e6a23c; }
-  .tag-info { background: #f4f4f5; color: #909399; }
-  .api-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; font-size: 12px; color: #606266; }
-  .api-body .field { display: flex; flex-direction: column; gap: 2px; }
-  .api-body .field-label { color: #909399; font-size: 11px; }
-  .api-body .field-value { font-family: "SF Mono",Consolas,monospace; color: #303133; }
   .empty { text-align: center; color: #909399; padding: 40px 0; }
   .footer { margin-top: 24px; padding-top: 16px; border-top: 1px solid #e4e7ed; text-align: center; color: #909399; font-size: 12px; }
   .btn-admin { display: inline-block; margin-top: 8px; padding: 8px 16px; background: #409eff; color: #fff; border-radius: 6px; text-decoration: none; font-size: 13px; }
@@ -41,9 +28,6 @@
     .wrap { padding: 8px 12px; }
     .stat-card { padding: 12px; }
     .stat-card .num { font-size: 24px; }
-    .api-card { padding: 10px 12px; }
-    .api-header .path { font-size: 13px; }
-    .api-body { grid-template-columns: 1fr 1fr; }
   }
 </style>
 </head>
@@ -63,9 +47,7 @@
     <div class="stat-card"><div class="num">-</div><div class="label">今日调用</div></div>
   </div>
 
-  <div id="apiList" class="api-list">
-    <div class="loading">加载中…</div>
-  </div>
+  <div id="statsStatus" class="loading">加载中…</div>
 
   <div class="footer">
     <a href="/admin/" class="btn-admin">进入管理后台</a>
@@ -75,9 +57,11 @@
 
 <script>
 (function() {
-  const API_BASE = location.origin + '/api/index.php';
+  window.APP_CONFIG = window.APP_CONFIG || {};
+  const API_BASE = window.APP_CONFIG.API_BASE
+    || new URL('api/index.php', document.baseURI).href;
   const overviewEl = document.getElementById('overview');
-  const apiListEl = document.getElementById('apiList');
+  const statsStatusEl = document.getElementById('statsStatus');
 
   function fmtNum(n) {
     if (n >= 10000) return (n/10000).toFixed(1) + 'w';
@@ -101,37 +85,9 @@
     });
   }
 
-  function renderApis(apis) {
-    if (!apis || apis.length === 0) {
-      apiListEl.innerHTML = '<div class="empty">暂无 API，请前往后台新增</div>';
-      return;
-    }
-    apiListEl.innerHTML = '';
-    apis.forEach(api => {
-      const div = document.createElement('div');
-      div.className = 'api-card';
-      const typeTag = api.type === 'template'
-        ? '<span class="tag tag-warning">template</span>'
-        : '<span class="tag tag-success">random_text</span>';
-      const statusTag = api.enabled === 1
-        ? '<span class="tag tag-success">启用</span>'
-        : '<span class="tag tag-info">禁用</span>';
-      div.innerHTML =
-        '<div class="api-header">' +
-          '<span class="path">' + escapeHtml(api.path) + '</span>' +
-          (api.name ? '<span class="name">' + escapeHtml(api.name) + '</span>' : '') +
-          typeTag + statusTag +
-        '</div>' +
-        '<div class="api-body">' +
-          '<div class="field"><span class="field-label">素材数</span><span class="field-value">' + fmtNum(api.text_count) + '</span></div>' +
-          '<div class="field"><span class="field-label">调用数</span><span class="field-value">' + fmtNum(api.call_total) + '</span></div>' +
-        '</div>';
-      apiListEl.appendChild(div);
-    });
-  }
-
-  function escapeHtml(str) {
-    return String(str).replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>').replace(/"/g,'"').replace(/'/g,''');
+  function setStatus(message, isError) {
+    statsStatusEl.className = isError ? 'error' : 'empty';
+    statsStatusEl.textContent = message;
   }
 
   function loadStats() {
@@ -140,13 +96,13 @@
       .then(res => {
         if (res && res.code === 0 && res.data) {
           renderOverview(res.data.overview || {});
-          renderApis(res.data.apis || []);
+          setStatus('仅展示汇总统计，不公开接口明细。', false);
         } else {
-          apiListEl.innerHTML = '<div class="error">加载失败：' + escapeHtml(res?.msg || '未知错误') + '</div>';
+          setStatus('加载失败：' + (res?.msg || '未知错误'), true);
         }
       })
       .catch(e => {
-        apiListEl.innerHTML = '<div class="error">请求异常：' + escapeHtml(e.message) + '</div>';
+        setStatus('请求异常：' + e.message, true);
       });
   }
 

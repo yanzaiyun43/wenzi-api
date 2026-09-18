@@ -105,14 +105,17 @@ function runtime_run()
         json_error(500, '未知 API 类型');
     }
 
-    // ---------- 6. 输出长度限制 1MB ----------
-    if (strlen($output) > 1048576) {
-        $output = substr($output, 0, 1048576);
-    }
+    // ---------- 6. 输出长度限制 1MB（按 UTF-8 边界截断） ----------
+    $output = utf8_truncate_bytes($output, 1048576);
 
     // ---------- 7. 成功返回纯文本 ----------
     header('Content-Type: text/plain; charset=utf-8');
     echo $output;
+
+    // PHP-FPM 下先结束客户端响应，再继续记录日志，避免日志锁等待拉长用户感知延迟。
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
 
     // ---------- 8. 写调用日志（失败忽略，key 已排除）----------
     runtime_write_log($pdo, $apiId);
@@ -131,6 +134,16 @@ function runtime_replace_template($content)
         '#\{\{\s*([a-zA-Z0-9_]{1,32})\s*\}\}#',
         function ($m) {
             $name = $m[1];
+            // 这些参数用于鉴权或路由控制，禁止被模板回显。
+            $reserved = array(
+                'key', 'api-key', 'x-api-key', 'api_key',
+                'token', 'access-token', 'access_token',
+                'admin-token', 'admin_token', 'authorization',
+                'route', 'path'
+            );
+            if (in_array(strtolower($name), $reserved, true)) {
+                return '';
+            }
             return isset($_GET[$name]) ? (string)$_GET[$name] : '';
         },
         $content
@@ -160,21 +173,30 @@ function runtime_random_text($pdo, $apiId)
  */
 function runtime_write_log($pdo, $apiId)
 {
-    // 脱敏：构造 params，排除敏感键
-    $exclude = array('key', 'route', 'admin-token', 'X-API-Key', 'x-api-key', 'API-Key');
+    // 脱敏：只记录业务查询参数，不记录任何鉴权、路由控制参数。
+    // 键名统一转小写后比较，避免大小写变体绕过脱敏。
+    $exclude = array(
+        'key', 'api-key', 'api_key', 'x-api-key',
+        'token', 'access-token', 'access_token',
+        'admin-token', 'admin_token', 'authorization',
+        'route', 'path'
+    );
     $params = array();
     foreach ($_GET as $k => $v) {
-        $kk = strtolower((string)$k);
+        $kk = strtolower(trim((string)$k));
         if (in_array($kk, $exclude, true)) {
             continue;
         }
+        // 请求头中的 X-API-Key / Authorization 从不写入 params；
+        // 这里仅记录 GET 业务参数，避免鉴权信息落入日志。
         $params[$k] = $v;
     }
 
     $paramsStr = json_encode($params, JSON_UNESCAPED_UNICODE);
-    if (strlen($paramsStr) > 2000) {
-        $paramsStr = substr($paramsStr, 0, 2000);
+    if (!is_string($paramsStr)) {
+        $paramsStr = '{}';
     }
+    $paramsStr = utf8_truncate_bytes($paramsStr, 2000);
 
     // IP
     $ip = isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '';
@@ -194,9 +216,27 @@ function runtime_write_log($pdo, $apiId)
             ':call_time' => time(),
             ':params'    => $paramsStr,
         ));
+        runtime_prune_logs($pdo);
     } catch (PDOException $e) {
         // 忽略：日志失败不影响主接口返回
     }
+}
+
+/**
+ * 按配置概率清理过期日志，避免每次调用都做 DELETE。
+ * LOG_RETENTION_DAYS <= 0 时关闭自动清理；默认保留 90 天。
+ */
+function runtime_prune_logs($pdo)
+{
+    $days = defined('LOG_RETENTION_DAYS') ? (int)LOG_RETENTION_DAYS : 90;
+    if ($days <= 0 || mt_rand(1, 100) !== 1) {
+        return;
+    }
+
+    $cutoff = time() - ($days * 86400);
+    // 单次最多删除 1000 行，避免首次清理历史大库时长时间占写锁。
+    $st = $pdo->prepare('DELETE FROM api_log WHERE id IN (SELECT id FROM api_log WHERE call_time < :cutoff ORDER BY id LIMIT 1000)');
+    $st->execute(array(':cutoff' => $cutoff));
 }
 
 // —— 执行 ——

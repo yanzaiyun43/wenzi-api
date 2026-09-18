@@ -1,6 +1,6 @@
 <?php
 /**
- * 旧识桥 api · backend/db.php
+ * 旧识桥 api · api/db.php
  * ----------------------------------------------------------------
  * SQLite（PDO）连接、初始化建表、锁重试封装。
  * 被统一入口 index.php（APP_ENTRY）与安装脚本 install.php（APP_INSTALL）
@@ -44,7 +44,31 @@ function slen($s)
 }
 
 /**
- * 建立/复用 PDO SQLite 连接；必要时自动建表（首次访问自动建表）。
+ * 将 UTF-8 字符串截断到最多 $maxBytes 字节，不拆开多字节字符。
+ * mbstring 不可用时按 UTF-8 前缀逐字节回退，保证输出仍为合法 UTF-8。
+ */
+function utf8_truncate_bytes($s, $maxBytes)
+{
+    $s = (string)$s;
+    $maxBytes = max(0, (int)$maxBytes);
+    if (strlen($s) <= $maxBytes) {
+        return $s;
+    }
+    if (function_exists('mb_strcut')) {
+        return mb_strcut($s, 0, $maxBytes, 'UTF-8');
+    }
+
+    $cut = substr($s, 0, $maxBytes);
+    while ($cut !== '' && !preg_match('//u', $cut)) {
+        $cut = substr($cut, 0, -1);
+    }
+    return $cut;
+}
+
+/**
+ * 建立/复用 PDO SQLite 连接；在安装流程或已存在的业务数据库上按需幂等初始化表结构。
+ * 公开 stats 会在调用前检查数据库文件，未安装时不会触发建库。
+ * 连接和初始化都成功后才缓存 PDO，避免失败连接污染同一次请求。
  * 连接失败抛 PDOException（如目录不可写），由调用方处理。
  */
 function db_connect(): PDO
@@ -54,18 +78,19 @@ function db_connect(): PDO
         return $pdo;
     }
 
-    $pdo = new PDO('sqlite:' . DB_PATH, null, null, array(
+    // 用局部变量完成连接与初始化；任何一步失败都不写入静态缓存。
+    $connection = new PDO('sqlite:' . DB_PATH, null, null, array(
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ));
 
     // 必设 PRAGMA：外键约束 + 忙等待超时 5000ms
-    $pdo->exec('PRAGMA foreign_keys = ON');
-    $pdo->exec('PRAGMA busy_timeout = 5000');
+    $connection->exec('PRAGMA foreign_keys = ON');
+    $connection->exec('PRAGMA busy_timeout = 5000');
 
     // WAL 可选优化：不支持时静默回退到默认 journal 模式，不能报错
     try {
-        $mode = $pdo->query('PRAGMA journal_mode = WAL')->fetchColumn();
+        $mode = $connection->query('PRAGMA journal_mode = WAL')->fetchColumn();
         if (is_string($mode) && strtolower($mode) === 'wal') {
             // WAL 启用成功
         }
@@ -74,11 +99,12 @@ function db_connect(): PDO
         // 静默回退，不报错
     }
 
-    // 首次访问自动建表（幂等；建表也可能遇到锁，走重试封装）
-    db_retry(function () use ($pdo) {
-        db_init_tables($pdo);
+    // 幂等初始化表结构；公开 stats 已在调用前检查 DB_PATH，未安装时不会进入这里。
+    db_retry(function () use ($connection) {
+        db_init_tables($connection);
     });
 
+    $pdo = $connection;
     return $pdo;
 }
 
@@ -120,6 +146,15 @@ function db_init_tables(PDO $pdo)
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_text_api_id   ON api_text(api_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_log_api_id    ON api_log(api_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_api_log_call_time ON api_log(call_time)');
+
+    // “跳过重复”需要数据库最终兜底。旧库首次迁移时保留每组最早记录后创建唯一索引。
+    $indexName = 'idx_api_text_api_content_unique';
+    $st = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :name LIMIT 1");
+    $st->execute(array(':name' => $indexName));
+    if ($st->fetchColumn() === false) {
+        $pdo->exec('DELETE FROM api_text WHERE id NOT IN (SELECT MIN(id) FROM api_text GROUP BY api_id, content)');
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_api_text_api_content_unique ON api_text(api_id, content)');
+    }
 }
 
 /**

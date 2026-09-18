@@ -43,6 +43,12 @@ function cors_handle()
         $allowed = $ALLOWED_ORIGINS;
     }
 
+    // 只要请求携带 Origin，响应就必须参与 Origin 缓存区分；
+    // 即使来源未获准，也要发送 Vary，避免共享缓存复用错误响应。
+    if ($origin !== '') {
+        header('Vary: Origin');
+    }
+
     $matchOrigin = '';
     if ($origin !== '') {
         if (in_array('*', $allowed, true)) {
@@ -58,7 +64,6 @@ function cors_handle()
         header('Access-Control-Allow-Headers: Content-Type, X-Admin-Token, X-API-Key, Authorization');
         header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
         header('Access-Control-Max-Age: 86400');
-        header('Vary: Origin');
     }
 
     // OPTIONS 预检直接 204，不进入业务逻辑

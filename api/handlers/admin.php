@@ -349,10 +349,11 @@ function admin_api_save()
             if (stripos($e->getMessage(), 'UNIQUE') !== false) {
                 admin_denied_400('path 已存在');
             }
+            error_log('[wenzi-api] admin_api_save update failed: ' . $e->getMessage());
             json_error(500, '服务器错误');
         }
         if ($st->rowCount() === 0) {
-            // 可能 id 不存在（update 0 行）——校验存在性
+            // 可能 id 不存在，或提交内容与原值相同；校验记录是否仍存在。
             $chk = $pdo->prepare('SELECT COUNT(*) FROM api_config WHERE id=:id');
             $chk->execute(array(':id' => $id));
             if ((int)$chk->fetchColumn() === 0) {
@@ -377,6 +378,7 @@ function admin_api_save()
             if (stripos($e->getMessage(), 'UNIQUE') !== false) {
                 admin_denied_400('path 已存在');
             }
+            error_log('[wenzi-api] admin_api_save insert failed: ' . $e->getMessage());
             json_error(500, '服务器错误');
         }
         json_ok(array('id' => (int)$pdo->lastInsertId()));
@@ -505,7 +507,15 @@ function admin_text_save()
 
     if ($id > 0) {
         $st = $pdo->prepare('UPDATE api_text SET content=:content WHERE id=:id AND api_id=:api_id');
-        $st->execute(array(':content' => $content, ':id' => $id, ':api_id' => $apiId));
+        try {
+            $st->execute(array(':content' => $content, ':id' => $id, ':api_id' => $apiId));
+        } catch (PDOException $e) {
+            if (stripos($e->getMessage(), 'UNIQUE') !== false) {
+                admin_denied_400('素材内容已存在');
+            }
+            error_log('[wenzi-api] admin_text_save update failed: ' . $e->getMessage());
+            json_error(500, '服务器错误');
+        }
         if ($st->rowCount() === 0) {
             $chk2 = $pdo->prepare('SELECT COUNT(*) FROM api_text WHERE id=:id');
             $chk2->execute(array(':id' => $id));
@@ -516,7 +526,15 @@ function admin_text_save()
         json_ok(array('id' => $id));
     } else {
         $st = $pdo->prepare('INSERT INTO api_text (api_id, content) VALUES (:api_id, :content)');
-        $st->execute(array(':api_id' => $apiId, ':content' => $content));
+        try {
+            $st->execute(array(':api_id' => $apiId, ':content' => $content));
+        } catch (PDOException $e) {
+            if (stripos($e->getMessage(), 'UNIQUE') !== false) {
+                admin_denied_400('素材内容已存在');
+            }
+            error_log('[wenzi-api] admin_text_save insert failed: ' . $e->getMessage());
+            json_error(500, '服务器错误');
+        }
         json_ok(array('id' => (int)$pdo->lastInsertId()));
     }
 }
@@ -600,60 +618,69 @@ function admin_text_batch_save()
         admin_denied_404('API 不存在');
     }
 
-    // 读取该 API 下已有内容（用于去重）
-    $existing = array();
-    if ($skipDuplicate) {
-        $st = $pdo->prepare('SELECT content FROM api_text WHERE api_id = :api_id');
-        $st->execute(array(':api_id' => $apiId));
-        while ($row = $st->fetch()) {
-            $existing[$row['content']] = true;
-        }
-    }
-
-    // 去重处理
+    // 清洗输入并统计无效行；空行和超长行不再静默丢失。
     $toInsert = array();
     $seenInBatch = array();
     $skipped = 0;
+    $invalid = 0;
     foreach ($contents as $c) {
         $c = trim((string)$c);
-        if ($c === '') continue;
-        if (slen($c) > 5000) continue;
-        if (isset($seenInBatch[$c])) { $skipped++; continue; }
-        if ($skipDuplicate && isset($existing[$c])) { $skipped++; continue; }
+        if ($c === '' || slen($c) > 5000) {
+            $invalid++;
+            continue;
+        }
+        if (isset($seenInBatch[$c])) {
+            $skipped++;
+            continue;
+        }
         $toInsert[] = $c;
         $seenInBatch[$c] = true;
     }
 
-    if (empty($toInsert)) {
-        json_ok(array('inserted' => 0, 'skipped' => $skipped));
+    // 读取该 API 下已有内容。即使前端选择“不去重”，数据库唯一约束也不允许重复；
+    // 后续 INSERT OR IGNORE 会把并发冲突准确计入 skipped。
+    $existing = array();
+    $st = $pdo->prepare('SELECT content FROM api_text WHERE api_id = :api_id');
+    $st->execute(array(':api_id' => $apiId));
+    while ($row = $st->fetch()) {
+        $existing[$row['content']] = true;
+    }
+    if ($skipDuplicate) {
+        $filtered = array();
+        foreach ($toInsert as $c) {
+            if (isset($existing[$c])) {
+                $skipped++;
+                continue;
+            }
+            $filtered[] = $c;
+        }
+        $toInsert = $filtered;
     }
 
-    // 单事务批量写入
+    if (empty($toInsert)) {
+        json_ok(array('inserted' => 0, 'skipped' => $skipped, 'invalid' => $invalid));
+    }
+
     $inserted = 0;
     try {
-        $result = db_transaction($pdo, function ($pdo) use ($apiId, $toInsert, &$inserted) {
-            $st = $pdo->prepare('INSERT INTO api_text (api_id, content) VALUES (:api_id, :content)');
+        db_transaction($pdo, function ($pdo) use ($apiId, $toInsert, &$inserted, &$skipped) {
+            $st = $pdo->prepare('INSERT OR IGNORE INTO api_text (api_id, content) VALUES (:api_id, :content)');
             foreach ($toInsert as $c) {
                 $st->execute(array(':api_id' => $apiId, ':content' => $c));
-                $inserted++;
+                if ($st->rowCount() > 0) {
+                    $inserted++;
+                } else {
+                    // 既有数据或并发请求刚插入：唯一约束导致忽略，计入跳过。
+                    $skipped++;
+                }
             }
-            return true;
         });
     } catch (PDOException $e) {
-        if (stripos($e->getMessage(), 'UNIQUE') !== false) {
-            // 极少数并发冲突，兜底：逐条尝试
-            $inserted = 0;
-            $st = $pdo->prepare('INSERT IGNORE INTO api_text (api_id, content) VALUES (:api_id, :content)');
-            foreach ($toInsert as $c) {
-                $st->execute(array(':api_id' => $apiId, ':content' => $c));
-                if ($st->rowCount() > 0) $inserted++;
-            }
-        } else {
-            json_error(500, '批量导入失败：' . $e->getMessage());
-        }
+        error_log('[wenzi-api] admin_text_batch_save failed: ' . $e->getMessage());
+        json_error(500, '批量导入失败，请稍后重试');
     }
 
-    json_ok(array('inserted' => $inserted, 'skipped' => $skipped));
+    json_ok(array('inserted' => $inserted, 'skipped' => $skipped, 'invalid' => $invalid));
 }
 
 // ============ 日志管理 ============

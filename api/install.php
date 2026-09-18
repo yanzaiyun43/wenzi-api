@@ -1,8 +1,8 @@
 <?php
 /**
- * 旧识桥 api · backend/install.php（一键安装脚本）
+ * 旧识桥 api · api/install.php（一键安装脚本）
  * ----------------------------------------------------------------
- * 访问方式：https://你的域名/backend/install.php
+ * 访问方式：https://你的域名/api/install.php
  * 流程：
  *   1. install.lock 已存在 -> 拒绝安装
  *   2. 环境检查（PHP>=7.4、PDO、pdo_sqlite、目录可写等）
@@ -11,7 +11,7 @@
  *      install.lock；config.php 已存在且无 lock 时二次确认覆盖
  *   5. 安装成功后提示删除 install.php 或保留 install.lock
  *
- * 可选 CLI：php backend/install.php --admin-token=xxx --api-key=xxx --origins=https://example.com
+ * 可选 CLI：php api/install.php --admin-token=xxx --api-key=xxx --origins=https://example.com
  * 禁止 eval/exec/system/shell_exec 等危险函数；禁止执行用户输入代码。
  * ----------------------------------------------------------------
  */
@@ -108,7 +108,7 @@ function install_env_checks()
         $problems[] = '缺少 pdo_sqlite 扩展';
     }
     if (!is_dir(__DIR__) || !is_writable(__DIR__)) {
-        $problems[] = 'backend/ 目录不可写';
+        $problems[] = 'api/ 目录不可写';
     }
     $dbFile = __DIR__ . '/api.db';
     if (file_exists($dbFile) && !is_writable($dbFile)) {
@@ -132,7 +132,7 @@ function install_build_config($adminToken, $apiKey, array $origins)
     return <<<PHP
 <?php
 /**
- * 旧识桥 api · backend/config.php（由 install.php 生成）
+ * 旧识桥 api · api/config.php（由 install.php 生成）
  * 可手动编辑以下常量更换密钥/来源；保存即生效，无需重启（短进程模式）。
  */
 
@@ -151,41 +151,106 @@ define('API_ACCESS_KEY', {$keyExpr});
 define('DB_PATH', __DIR__ . '/api.db');
 
 define('TRUST_X_FORWARDED_FOR', false);
+
+// 调用日志保留天数；设为 0 可关闭自动清理。
+define('LOG_RETENTION_DAYS', 90);
 PHP;
 }
 
 // —— 执行安装（生成 config / 建库 / 建表 / 写锁）——
 function install_run($adminToken, $apiKey, array $origins, $withSample)
 {
-    $cfgFile = __DIR__ . '/config.php';
-    $dbFile  = __DIR__ . '/api.db';
+    $cfgFile  = __DIR__ . '/config.php';
+    $dbFile   = __DIR__ . '/api.db';
     $lockFile = __DIR__ . '/install.lock';
+    $cfgTmp   = tempnam(__DIR__, '.config.php.');
+    $lockTmp  = tempnam(__DIR__, '.install.lock.');
+    $cfgBackup = null;
+    $configInstalled = false;
+    $lockInstalled = false;
+    $dbExisted = is_file($dbFile);
+    $sampleTransaction = false;
 
-    // 1. 生成 config.php（覆盖已存在文件，调用方已确认）
-    $code = install_build_config($adminToken, $apiKey, $origins);
-    if (file_put_contents($cfgFile, $code) === false) {
-        return array(false, 'config.php 写入失败');
+    if ($cfgTmp === false || $lockTmp === false) {
+        if ($cfgTmp !== false) @unlink($cfgTmp);
+        if ($lockTmp !== false) @unlink($lockTmp);
+        return array(false, '无法创建安装临时文件');
     }
 
-    // 2. 建库 + 建表（复用 db.php）
-    require_once __DIR__ . '/db.php';
     try {
+        // 先写临时配置和临时锁，安装成功前不触碰正式配置/锁文件。
+        $code = install_build_config($adminToken, $apiKey, $origins);
+        if (file_put_contents($cfgTmp, $code, LOCK_EX) === false) {
+            throw new RuntimeException('config.php 写入失败');
+        }
+        @chmod($cfgTmp, 0600);
+        if (file_put_contents($lockTmp, date('c'), LOCK_EX) === false) {
+            throw new RuntimeException('install.lock 写入失败');
+        }
+        @chmod($lockTmp, 0600);
+
+        // 先完成数据库初始化和示例数据事务；失败时正式配置仍保持原样。
+        require_once __DIR__ . '/db.php';
         $pdo = db_connect();
-    } catch (PDOException $e) {
-        return array(false, '数据库初始化失败：' . $e->getMessage());
-    }
+        if ($withSample) {
+            // 将示例数据留在事务中，配置/锁文件安装失败时一起回滚。
+            $pdo->beginTransaction();
+            $sampleTransaction = true;
+            install_sample_data($pdo);
+        }
 
-    // 3. 写入示例 API 与素材（可选）
-    if ($withSample) {
-        install_sample_data($pdo);
-    }
+        // 覆盖旧配置前先留备份，后续任一步失败都恢复旧文件。
+        if (is_file($cfgFile)) {
+            $cfgBackup = tempnam(__DIR__, '.config.php.backup.');
+            if ($cfgBackup === false || !@unlink($cfgBackup) || !@rename($cfgFile, $cfgBackup)) {
+                throw new RuntimeException('原 config.php 备份失败');
+            }
+        }
+        if (!@rename($cfgTmp, $cfgFile)) {
+            throw new RuntimeException('config.php 安装失败');
+        }
+        $configInstalled = true;
 
-    // 4. 写 install.lock
-    if (file_put_contents($lockFile, date('c')) === false) {
-        return array(false, 'install.lock 写入失败');
-    }
+        if (!@rename($lockTmp, $lockFile)) {
+            throw new RuntimeException('install.lock 安装失败');
+        }
+        $lockInstalled = true;
 
-    return array(true, 'ok');
+        if ($sampleTransaction && $pdo->inTransaction()) {
+            $pdo->commit();
+            $sampleTransaction = false;
+        }
+        if ($cfgBackup !== null) {
+            @unlink($cfgBackup);
+            $cfgBackup = null;
+        }
+        return array(true, 'ok');
+    } catch (Throwable $e) {
+        if (isset($pdo) && $sampleTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[wenzi-api] install failed: ' . $e->getMessage());
+        if ($lockInstalled) {
+            @unlink($lockFile);
+        }
+        if ($configInstalled) {
+            @unlink($cfgFile);
+        }
+        if ($cfgBackup !== null && is_file($cfgBackup)) {
+            @rename($cfgBackup, $cfgFile);
+        }
+        // 新安装失败时删除本次创建的 SQLite 文件及 WAL 临时文件；已有数据库不触碰。
+        if (!$dbExisted) {
+            @unlink($dbFile);
+            @unlink($dbFile . '-wal');
+            @unlink($dbFile . '-shm');
+        }
+        return array(false, '安装失败，请检查目录权限和数据库状态');
+    } finally {
+        if (is_file($cfgTmp)) @unlink($cfgTmp);
+        if (is_file($lockTmp)) @unlink($lockTmp);
+        if ($cfgBackup !== null && is_file($cfgBackup)) @unlink($cfgBackup);
+    }
 }
 
 function install_sample_data($pdo)
@@ -206,7 +271,7 @@ function install_sample_data($pdo)
     $pid->execute();
     $dailyId = (int)$pid->fetchColumn();
     if ($dailyId > 0) {
-        $ins = $pdo->prepare('INSERT INTO api_text (api_id, content) VALUES (:aid, :content)');
+        $ins = $pdo->prepare('INSERT OR IGNORE INTO api_text (api_id, content) VALUES (:aid, :content)');
         $ins->execute(array(':aid' => $dailyId, ':content' => '今天也要加油哦！'));
         $ins->execute(array(':aid' => $dailyId, ':content' => '愿你被世界温柔以待。'));
     }
@@ -267,8 +332,8 @@ if ($IS_CLI) {
     fwrite(STDOUT, "安装成功\n");
     fwrite(STDOUT, "管理员 TOKEN：$adminToken\n");
     fwrite(STDOUT, "API 密钥：$apiKey\n");
-    fwrite(STDOUT, "管理接口：https://你的域名/backend/index.php?route=admin/api/list\n");
-    fwrite(STDOUT, "调用示例：https://你的域名/backend/index.php?route=runtime&path=hello&key=$apiKey&name=张三\n");
+    fwrite(STDOUT, "管理接口：https://你的域名/api/index.php?route=admin/api/list\n");
+    fwrite(STDOUT, "调用示例：https://你的域名/api/index.php?route=runtime&path=hello&key=$apiKey&name=张三\n");
     fwrite(STDOUT, "请删除 install.php 或保留 install.lock\n");
     exit(0);
 }
@@ -297,10 +362,15 @@ if ($submitted) {
     $formData['sample']      = isset($_POST['sample']) ? (string)$_POST['sample'] : '0';
 
     // 二次确认覆盖：config.php 已存在且无 lock 时，需确认参数
+    // 取消按钮也会提交 confirm=1，因此必须优先判断 go=cancel。
+    $cancelled = (isset($_POST['go']) && $_POST['go'] === 'cancel');
     $confirmed = (isset($_POST['confirm']) && $_POST['confirm'] === '1');
 
     $configExists = file_exists(__DIR__ . '/config.php');
-    if ($configExists && !$confirmed) {
+    if ($cancelled) {
+        // 用户取消覆盖，不执行安装
+        $resultMsg = '已取消覆盖安装';
+    } elseif ($configExists && !$confirmed) {
         // 需二次确认，不执行
         $showConfirm = true;
         $resultMsg = 'config.php 已存在，是否覆盖安装？';
@@ -396,11 +466,11 @@ if (!$submitted) {
         管理员 TOKEN：<code><?php echo htmlspecialchars($formData['admin_token']); ?></code>
         API 密钥：<code><?php echo htmlspecialchars($formData['api_key']); ?></code>
 
-        管理接口：<code>backend/index.php?route=admin/api/list</code>
-        调用示例：<code>backend/index.php?route=runtime&amp;path=hello&amp;key=<?php echo htmlspecialchars($formData['api_key']); ?>&amp;name=张三</code>
+        管理接口：<code>api/index.php?route=admin/api/list</code>
+        调用示例：<code>api/index.php?route=runtime&amp;path=hello&amp;key=<?php echo htmlspecialchars($formData['api_key']); ?>&amp;name=张三</code>
 
         <b>请立即删除 install.php，或至少保留 install.lock。</b>
-        修改 backend/config.php 可更换密钥。
+        修改 api/config.php 可更换密钥。
       </div>
     <?php else: ?>
       <?php if ($resultMsg !== ''): ?>

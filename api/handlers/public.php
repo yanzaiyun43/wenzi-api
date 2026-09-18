@@ -4,8 +4,9 @@
  * ----------------------------------------------------------------
  * 仅被统一入口 index.php（APP_ENTRY）include，禁止浏览器直接访问。
  * 提供公开统计接口，无需鉴权：
- *   - stats：返回总览统计（API 数、素材总数、调用总数、今日调用）+ 每个 API 卡片数据
- * 返回数据不含 key、素材内容、调用参数等敏感信息。
+ *   - stats：仅返回总览统计（API 数、素材总数、调用总数、今日调用）
+ * 统计不公开 API 路径、名称、状态、素材数或调用数等业务明细；
+ * 数据库不存在时直接返回受控错误，绝不由公开请求创建数据库或表。
  * ----------------------------------------------------------------
  */
 
@@ -47,60 +48,40 @@ if (!function_exists('json_ok')) {
 }
 
 /**
- * GET stats —— 公开统计数据（无需鉴权）
- * 返回：
- *   overview: { api_total, text_total, call_total, call_today }
- *   apis: [{ id, path, name, type, enabled, text_count, call_total }]
+ * GET stats —— 公开总览统计数据（无需鉴权）。
+ * 仅返回 overview: { api_total, text_total, call_total, call_today }。
+ * 未完成安装或数据库文件不存在时返回 503，不调用 db_connect()，避免公开请求创建数据库或表。
  */
 function public_stats()
 {
-    $pdo = db_connect();
+    if (!is_file(DB_PATH)) {
+        json_error(503, '统计暂不可用');
+    }
 
-    // 总览：API 总数
-    $st = $pdo->query('SELECT COUNT(*) FROM api_config');
-    $apiTotal = (int)$st->fetchColumn();
+    try {
+        $pdo = db_connect();
 
-    // 总览：素材总数
-    $st = $pdo->query('SELECT COUNT(*) FROM api_text');
-    $textTotal = (int)$st->fetchColumn();
-
-    // 总览：调用总数
-    $st = $pdo->query('SELECT COUNT(*) FROM api_log');
-    $callTotal = (int)$st->fetchColumn();
-
-    // 总览：今日调用（按服务器时区）
-    $todayStart = strtotime(date('Y-m-d 00:00:00'));
-    $st = $pdo->prepare('SELECT COUNT(*) FROM api_log WHERE call_time >= :today');
-    $st->execute(array(':today' => $todayStart));
-    $callToday = (int)$st->fetchColumn();
-
-    // 每个 API 的统计
-    $st = $pdo->query('SELECT id, path, name, type, enabled FROM api_config ORDER BY id');
-    $apisRaw = $st->fetchAll();
-
-    $apis = array();
-    foreach ($apisRaw as $api) {
-        $apiId = (int)$api['id'];
-
-        // 该 API 素材数
-        $st = $pdo->prepare('SELECT COUNT(*) FROM api_text WHERE api_id = :api_id');
-        $st->execute(array(':api_id' => $apiId));
-        $textCount = (int)$st->fetchColumn();
-
-        // 该 API 调用总数
-        $st = $pdo->prepare('SELECT COUNT(*) FROM api_log WHERE api_id = :api_id');
-        $st->execute(array(':api_id' => $apiId));
-        $callTotalApi = (int)$st->fetchColumn();
-
-        $apis[] = array(
-            'id'          => $apiId,
-            'path'        => $api['path'],
-            'name'        => $api['name'],
-            'type'        => $api['type'],
-            'enabled'     => (int)$api['enabled'],
-            'text_count'  => $textCount,
-            'call_total'  => $callTotalApi,
+        // 一次查询得到四项汇总，避免每次 stats 请求创建多个 statement。
+        $todayStart = strtotime(date('Y-m-d 00:00:00'));
+        $st = $pdo->prepare(
+            'SELECT '
+            . '(SELECT COUNT(*) FROM api_config) AS api_total, '
+            . '(SELECT COUNT(*) FROM api_text) AS text_total, '
+            . '(SELECT COUNT(*) FROM api_log) AS call_total, '
+            . '(SELECT COUNT(*) FROM api_log WHERE call_time >= :today) AS call_today'
         );
+        $st->execute(array(':today' => $todayStart));
+        $overview = $st->fetch();
+        if ($overview === false) {
+            throw new PDOException('统计查询无返回结果');
+        }
+        $apiTotal = (int)$overview['api_total'];
+        $textTotal = (int)$overview['text_total'];
+        $callTotal = (int)$overview['call_total'];
+        $callToday = (int)$overview['call_today'];
+    } catch (PDOException $e) {
+        error_log('[wenzi-api] public_stats failed: ' . $e->getMessage());
+        json_error(503, '统计暂不可用');
     }
 
     json_ok(array(
@@ -110,7 +91,6 @@ function public_stats()
             'call_total'  => $callTotal,
             'call_today'  => $callToday,
         ),
-        'apis' => $apis,
     ));
 }
 

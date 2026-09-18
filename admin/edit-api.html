@@ -51,25 +51,25 @@
       <el-form :model="form" :rules="rules" ref="formRef" label-width="110px" v-loading="loading">
 
         <el-form-item label="Path" prop="path">
-          <el-input v-model="form.path" placeholder="唯一标识，字母数字下划线中划线，如 greeting" maxlength="64" :disabled="isEdit"></el-input>
+          <el-input v-model="form.path" placeholder="唯一标识，字母数字下划线中划线，如 greeting" maxlength="64"></el-input>
           <div class="tip">对外地址：<span class="mono">{{ callPath }}</span></div>
         </el-form-item>
 
         <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="API 名称，用于后台展示" maxlength="100"></el-input>
+          <el-input v-model="form.name" @input="onNameInput" placeholder="API 名称，用于后台展示" maxlength="100"></el-input>
         </el-form-item>
 
         <el-form-item label="类型" prop="type">
-          <el-radio-group v-model="form.type" @change="onTypeChange">
-            <el-radio label="random_text">random_text（随机一条素材）</el-radio>
-            <el-radio label="template">template（模板变量替换）</el-radio>
+          <el-radio-group v-model="form.type">
+            <el-radio value="random_text">random_text（随机一条素材）</el-radio>
+            <el-radio value="template">template（模板变量替换）</el-radio>
           </el-radio-group>
           <div class="tip" v-if="form.type==='random_text'">文字素材请在「素材」页管理中新增；调用时随机返回其中一条。</div>
           <div class="tip" v-else>模板内容支持 {{参数名}} 变量替换；调用方传参后自动替换（未传替换为空）。</div>
         </el-form-item>
 
         <el-form-item label="模板内容" prop="content" v-if="form.type==='template'">
-          <el-input v-model="form.content" type="textarea" :rows="7" placeholder="如：你好，{{ name }}！今天是 {{ date }}。" maxlength="10000" show-word-limit></el-input>
+          <el-input v-model="form.content" @input="onContentInput" type="textarea" :rows="7" placeholder="如：你好，{{ name }}！今天是 {{ date }}。" maxlength="10000" show-word-limit></el-input>
           <div class="tip">使用 <span class="mono">{{参数名}}</span> 定义占位变量，调用方传对应参数即可替换。</div>
         </el-form-item>
 
@@ -123,19 +123,28 @@ const app = createApp({
     // 对外调用地址（复制用），与后端 runtime 路由一致
     const callPath = computed(() => {
       const p = form.path ? form.path : '[path]';
-      return JSQ.API_BASE + '?route=runtime&path=' + encodeURIComponent(p);
+      const key = JSQ.getApiKeyFromUrl();
+      let url = JSQ.API_BASE + '?route=runtime&path=' + encodeURIComponent(p);
+      if (key) url += '&key=' + encodeURIComponent(key);
+      return url;
     });
 
-    function onTypeChange() {
-      // 类型切换：无需额外动作（content 仅在 template 时展示并校验）
+    function limitCodePoints(value, max) {
+      return Array.from(String(value || '')).slice(0, max).join('');
+    }
+
+    function onNameInput(value) {
+      form.name = limitCodePoints(value, 100);
+    }
+
+    function onContentInput(value) {
+      form.content = limitCodePoints(value, 10000);
     }
 
     function goBack() { location.href = 'index.html'; }
 
     async function openApiKeyDialog() {
-      if (await JSQ.promptApiKey()) {
-        ElMessage.success('密钥已保存，复制地址将自动带上');
-      }
+      await JSQ.promptApiKey();
     }
 
     async function loadDetail() {
@@ -195,7 +204,7 @@ const app = createApp({
       loadDetail();
     });
 
-    return { JSQ, form, formRef, rules, isEdit, loading, saving, callPath, onSave, goBack, onTypeChange, openApiKeyDialog };
+    return { JSQ, form, formRef, rules, isEdit, loading, saving, callPath, onSave, goBack, onNameInput, onContentInput, openApiKeyDialog };
   },
 }).use(ElementPlus);
 

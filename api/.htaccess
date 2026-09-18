@@ -19,8 +19,9 @@
   Require all denied
 </FilesMatch>
 
-# 拒绝直接访问 handlers/ 目录下的所有 PHP（只允许经 index.php include）
-<FilesMatch "^handlers/.*\.php$">
+# 拒绝直接访问 handlers/ 目录下的处理器 PHP（FilesMatch 匹配文件名，不匹配目录路径）
+# 当前 handlers 目录中的处理器文件名为 admin.php、runtime.php。
+<FilesMatch "^(admin|runtime)\.php$">
   Require all denied
 </FilesMatch>
 
@@ -45,7 +46,7 @@ Options -Indexes
 #   Order allow,deny
 #   Deny from all
 # </FilesMatch>
-# <FilesMatch "^handlers/.*\.php$">
+# <FilesMatch "^(admin|runtime)\.php$">
 #   Order allow,deny
 #   Deny from all
 # </FilesMatch>
